@@ -49,6 +49,13 @@ def declare_size(jpeg: bytes, width: int, height: int) -> bytes:
     return jpeg[: sof + 5] + height.to_bytes(2, "big") + width.to_bytes(2, "big") + jpeg[sof + 9 :]
 
 
+def orient(jpeg: bytes, orientation: int) -> bytes:
+    """Add an EXIF segment holding only the orientation tag."""
+    entry = b"\x01\x12\x00\x03\x00\x00\x00\x01" + orientation.to_bytes(2, "big") + b"\x00\x00"
+    exif = b"Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01" + entry + b"\x00\x00\x00\x00"
+    return jpeg[:2] + b"\xff\xe1" + (len(exif) + 2).to_bytes(2, "big") + exif + jpeg[2:]
+
+
 def write_frame(images_dir: Path, camera: str, ts: int, width: int = 4, height: int = 3) -> Path:
     return write_frame_bytes(images_dir, camera, ts, encode(width, height))
 

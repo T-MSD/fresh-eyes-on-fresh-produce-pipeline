@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from ingest.frames import FrameFile, scan_frames
-from tests.builders import declare_size, encode, write_frame, write_frame_bytes
+from tests.builders import declare_size, encode, orient, write_frame, write_frame_bytes
 
 
 def test_finds_frames_per_camera_with_timestamp_and_size(tmp_path: Path):
@@ -64,6 +64,18 @@ def test_reads_size_of_jpeg_with_extra_segments_before_the_frame_header(tmp_path
     (frame,) = scan_frames(tmp_path).frames
 
     assert frame.size == (8, 6)
+
+
+@pytest.mark.parametrize(
+    ("orientation", "size"),
+    [(1, (8, 6)), (3, (8, 6)), (5, (6, 8)), (6, (6, 8)), (7, (6, 8)), (8, (6, 8))],
+)
+def test_stores_size_after_exif_rotation(tmp_path: Path, orientation: int, size: tuple[int, int]):
+    write_frame_bytes(tmp_path, "6215", 1751052241, orient(VALID, orientation))
+
+    (frame,) = scan_frames(tmp_path).frames
+
+    assert frame.size == size
 
 
 def test_accepts_jpg_and_jpeg_in_any_case_and_keeps_the_filename(tmp_path: Path):

@@ -57,7 +57,8 @@ def frame_ts(path: Path) -> datetime | None:
 
 
 def image_size(path: Path) -> tuple[int, int] | None:
-    """(width, height) of a JPEG that decodes to the size its header declares, else None.
+    """(width, height) as decoded, after EXIF rotation, of a JPEG that decodes to the size its
+    header declares (either way round), else None.
 
     The header is checked before decoding, so a header claiming a huge size is never decoded.
     """
@@ -72,7 +73,9 @@ def image_size(path: Path) -> tuple[int, int] | None:
     if image is None:
         return None
     height, width = image.shape[:2]
-    return (width, height) if (width, height) == declared else None
+    if (width, height) not in (declared, declared[::-1]):
+        return None
+    return width, height
 
 
 def jpeg_size(data: bytes) -> tuple[int, int] | None:

@@ -85,8 +85,9 @@ stops the load; files that are not timestamped JPEGs are listed and skipped.
 
 An image is unreadable when its JPEG header is missing or broken, declares a size of zero or
 above `MAX_FRAME_PIXELS` (checked before decoding, so a bad header cannot allocate gigabytes), or
-does not decode to the size it declares. Unreadable images are listed and stored without a size,
-so their areas still get a fallback.
+does not decode to the size it declares. EXIF rotation may swap width and height; the stored size
+is the decoded one, the image the planogram corners refer to. Unreadable images are listed and
+stored without a size, so their areas still get a fallback.
 
 ## Layout
 
