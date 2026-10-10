@@ -15,7 +15,7 @@ To explain a flow, a structure or a change, show it: a sketch, a tree, a diagram
 - **Install:** `uv sync` (core) or `uv sync --extra ml` (adds torch, transformers, open_clip).
 - **Run anything:** `uv run --env-file .env <command>`. Python does not read `.env` on its own.
 - **Lint + format:** `uv run ruff check .` and `uv run ruff format .`
-- **Tests:** `uv run pytest`
+- **Tests:** `uv run --env-file .env pytest`. Database tests need `TEST_DATABASE_URL`; they drop and recreate that database, so its name must end in `_test`. Without it they are skipped.
 - **Layout:** group code by concern in nested packages, imported from the repo root (`from config.db.schema import Area`). Everything database-related lives in `config/db/`: `connection.py` (engine), `schema.py` (SQLAlchemy models, one class per table) and `migrations/` (Alembic). `compose.yaml` stays at the root.
 - **Migrations:** after editing `config/db/schema.py`, run `uv run --env-file .env alembic revision --autogenerate -m "<change>"`, review the generated file, then `alembic upgrade head` and `alembic check`.
 
