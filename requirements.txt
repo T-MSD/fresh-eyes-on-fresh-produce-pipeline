@@ -8,6 +8,11 @@ numpy==2.5.3
 opencv-python-headless==5.0.0.93
 typer==0.27.3
 
+# Database
+sqlalchemy==2.1.4
+psycopg[binary]==3.3.6
+alembic==1.20.0
+
 # Vision models
 torch==2.14.1
 torchvision==0.29.1
