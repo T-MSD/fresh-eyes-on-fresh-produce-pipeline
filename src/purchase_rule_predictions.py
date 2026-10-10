@@ -8,7 +8,7 @@ Per product (out/product_groups.json):
           units, and OWL misses fruit, so a low count must never overrule "full" (it did on 181 crops).
           Otherwise the current submission's level, except that its "empty" becomes "half" (the count says
           a purchase would not empty the tray). Products OWL has no noun for keep the current level.
-planogram_compliant is copied unchanged from out/final_predictions.json. Nothing existing is overwritten.
+planogram_compliant is copied unchanged from out/final_predictions.before_hybrid.json. Nothing existing is overwritten.
 
     python src/purchase_rule_predictions.py
 """
@@ -38,7 +38,7 @@ def level_of_pct(p: float) -> str:
 def main(alpha: float = 300.0) -> None:
     items = json.loads((OUT / "crops" / "index.json").read_text())
     groups = json.loads((OUT / "product_groups.json").read_text())
-    base = json.loads((OUT / "final_predictions.json").read_text())
+    base = json.loads((OUT / "final_predictions.before_hybrid.json").read_text())
     counts = json.loads((OUT / "owl_counts.json").read_text())
     fill = {
         k: v["fill"]

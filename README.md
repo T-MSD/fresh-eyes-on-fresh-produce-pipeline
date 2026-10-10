@@ -115,12 +115,25 @@ compose.yaml                            # Postgres container
 dataset/                                # gitignored
   planogram.json
   training/<camera_id>/<unix_ts>.jpg
-out/                                    # pipeline outputs (gitignored)
+out/                                    # pipeline outputs (gitignored, except the small files listed below)
 ```
 
-## Status (10 Oct 2026)
+## Stock strategies (10 Oct 2026)
 
-Labelling, models and predictions are done for now. Everything runs from `src/`, in this order:
+Two strategies ship side by side. Compliance is the same in both: the zero-shot CLIP flag.
+
+| | Strategy A: blend | Strategy B: purchase rule |
+| --- | --- | --- |
+| Stock level | 75% fine-tuned network + 25% CLIP classifier, level with the best expected points | "empty" means one typical purchase leaves the tray bare; loose items counted, packages judged by fill |
+| Needs | `out/finetune/model.pt`, `out/labels.json` | product groups, OWL-ViT counts, fill percentages |
+| Output | `out/final_predictions.before_hybrid.json` | `out/purchase_rule_predictions.json` (regenerated, not tracked) |
+
+**`out/final_predictions.json` is the hybrid:** strategy A plus only the strategy B changes that were
+judged right by hand (28 of 1,962 areas). It is the submitted file.
+
+### Strategy A, step by step
+
+Everything runs from `src/`, in this order:
 
 | Step | Command | Output |
 | --- | --- | --- |
@@ -129,23 +142,74 @@ Labelling, models and predictions are done for now. Everything runs from `src/`,
 | CLIP zero-shot predictions | `python src/clip_predict.py --topk 5` | `out/clip_zeroshot.json`, `clip_embeddings.npz` |
 | hand-label in the browser | `python src/review_tool.py serve` | `out/labels.json` |
 | classifier on CLIP embeddings | `python src/train_classifier.py` | `out/predictions.json` |
-| fine-tuned network (all labels) | `python src/finetune.py --final` | `out/finetune/` |
-| **final submission file** | 75% network + 25% classifier for stock, zero-shot CLIP for compliance | `out/final_predictions.json` |
+| fine-tuned network (all labels) | `python src/finetune.py --final` | `out/finetune/` (`model.pt` is not tracked) |
 
-`finetune.py` without `--final` holds out 3 cameras and scores manual labels only (stock points per
-area, max 1.0; identification about +0.98). Latest held-out estimate for the final blend: about +0.07
-stock points, 73% exact level, 36 of 84 true halves found. All labels are 404 by hand
-(62 empty, 105 half, 237 full); the other 1,558 areas are CLIP's guess and are never used for scoring.
+`finetune.py` without `--final` holds out 3 cameras and scores the hand labels only. Latest run:
++0.49 stock points per area, 85% exact level, 15 of 19 halves found, identification +0.96 (3 cameras,
+79 labels, so rough). All labels are 404 by hand (62 empty, 105 half, 237 full) on the old rubric
+(empty <25%, half 25-75%, full >75%); the other 1,558 areas are CLIP's guess and are never used
+for scoring.
 
-### Parked: new stock cutoffs
+### Strategy B, step by step
 
-Labels follow the original rubric: empty <25%, half 25-75%, full >75%. To be tried later:
-empty 0-34%, half 35-79%, full 80-100%. Only two bands move: 25-34% (half to empty) and
-76-79% (full to half). No fill percentages were recorded, so crops have to be looked at again:
-`python src/pick_relabel.py` builds `out/relabel_queue.json` (111 crops) and
-`python src/review_tool.py serve --relabel --port 8001` saves to `out/labels_v2.json` (not started yet).
-Then rerun `finetune.py` on both label sets to compare. That test can say which rule the model
-separates better, not which one the hidden annotators used.
+| Step | Command | Output |
+| --- | --- | --- |
+| group every product by purchase size and method (count or fill) | `python src/product_groups.py` | `out/product_groups.json` |
+| count loose items with OWL-ViT v2 | `python src/owl_count.py` | `out/owl_counts.json` |
+| label fill percentages in the browser | `python src/fill_label_page.py` | `out/check/fill_labelling.html` -> `out/fill_labels.json` |
+| compare cutoff rules on held-out cameras | `python src/fill_probe.py` | printed table |
+| build strategy B predictions | `python src/purchase_rule_predictions.py` | `out/purchase_rule_predictions.json` |
+| judge where A and B disagree | `python src/compare_strategies.py`, then `--score` | `out/check/compare_strategies.html` |
+| keep only the changes judged right | `python src/hybrid_predictions.py` | `out/final_predictions.hybrid.json` |
+
+What strategy B does:
+- `product_groups.py` puts each product in a group with a typical purchase and an "empty means N units
+  or fewer" number. Products whose names end in KG are not always loose: three 1 KG apples, `CEBOLA NOVA CNT KG`
+  and all grapes are packaged on the shelf, so a small override list exists.
+- **Count products:** the OWL count turns a tray empty only if strategy A does not already say full.
+  Without that guard, 181 full trays became empty.
+- **Fill products** (packages, bunches, tomatoes and four overrides): ridge regression on the CLIP
+  embedding, trained on 146 hand-labelled fill percentages in 10% steps. Cutoffs: empty 0-15%,
+  half 16-64%, full 65-100%.
+
+### Results and limits
+
+On 100 crops where A and B disagreed, judged by hand under the purchase rule (3 judged "neither"):
+
+| File | Right on 97 crops | Points per crop (project scoring) |
+| --- | --- | --- |
+| A, the blend | 59 | -0.29 |
+| B, purchase rule | 38 | -1.08 |
+| hybrid (submitted) | 77 | +0.22 |
+
+- B alone lost to A. It only won on fill half-to-full (18 of 22), fill empty-to-full (1 of 1) and
+  count empty-to-half (4 of 5); the hybrid takes exactly those 28 changes. I picked those categories
+  after seeing the judgements, so the +0.22 is not a held-out estimate.
+- The hybrid has no score on dev labels: the 404 labels use the old rubric and train strategy A.
+- Cutoffs 0-34/35-79/80-100 and per-group "N units" exceptions did not beat 0-15/16-64/65-100 on
+  held-out cameras; the differences were inside the noise (about ±0.4 points).
+- Counting failed on packages (YOLO-World found nothing; OWL-ViT was judged unusable by hand on the
+  crops checked) and on dense loose trays such as tomatoes, so those products use fill percentages. OWL-ViT agreed with a hand count exactly on 54%
+  of 24 crops, within one item on 75%.
+- Run and tested under Python 3.14 locally; the repo pins 3.12.
+
+### Run on new images
+
+```bash
+python src/run_test.py --data-dir <folder with planogram.json and the camera folders>
+```
+
+It crops the new frames, runs CLIP, the saved network and the classifier, blends them, applies the
+one fill rule that survived (a blend "empty/half" becomes "full" when the fill model says >= 65%) and
+writes `out/test/predictions.json`. No training, about 20 seconds for 1,962 areas. It needs
+`out/finetune/model.pt` (`python src/finetune.py --final`), `out/labels.json`, `out/fill_labels.json`
+and `out/product_groups.json`. `python src/run_test.py --selftest` rebuilds the submission from its
+own crops; it differs from `out/final_predictions.json` on 5 areas, the OWL count changes that
+`run_test.py` leaves out on purpose. A product class the network has not seen is scored by the
+classifier alone and logged as a warning.
+
+Tracked files under `out/`: `labels.json`, `fill_labels.json`, `product_groups.json`,
+`final_predictions.json`, `final_predictions.before_hybrid.json`. Everything else is regenerated.
 
 Review tool keys: 1/2/3 empty/half/full (saves, next), 4/5/6 the same with wrong product,
 X wrong product and U unsure (press before 1/2/3), Enter accept suggestion, T todo/all.

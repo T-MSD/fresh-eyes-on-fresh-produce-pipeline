@@ -30,8 +30,8 @@ app = typer.Typer(add_completion=False)
 def main() -> None:
     items = json.loads((OUT / "crops" / "index.json").read_text())
     groups = json.loads((OUT / "product_groups.json").read_text())
-    cur = json.loads((OUT / "final_predictions.json").read_text())
-    new = json.loads((OUT / "final_predictions.purchase_rule.json").read_text())
+    cur = json.loads((OUT / "final_predictions.before_hybrid.json").read_text())
+    new = json.loads((OUT / "purchase_rule_predictions.json").read_text())
     out = copy.deepcopy(cur)
     taken = 0
     for it in items:

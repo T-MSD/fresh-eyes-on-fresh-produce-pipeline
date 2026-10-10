@@ -32,8 +32,8 @@ def level(d: dict, key: str) -> str:
 @app.command()
 def main(n: int = 100, score: bool = False) -> None:
     items = {i["key"]: i for i in json.loads((OUT / "crops" / "index.json").read_text())}
-    cur = json.loads((OUT / "final_predictions.json").read_text())
-    new = json.loads((OUT / "final_predictions.purchase_rule.json").read_text())
+    cur = json.loads((OUT / "final_predictions.before_hybrid.json").read_text())
+    new = json.loads((OUT / "purchase_rule_predictions.json").read_text())
     groups = json.loads((OUT / "product_groups.json").read_text())
     if score:
         return report(items, cur, new)
