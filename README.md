@@ -98,6 +98,35 @@ does not decode to the size it declares. EXIF rotation may swap width and height
 is the decoded one, the image the planogram corners refer to. Unreadable images are listed and
 stored without a size, so their areas still get a fallback.
 
+## API
+
+```bash
+uv run --env-file .env uvicorn src.main:app --reload
+```
+
+`GET /tasks` returns the tasks of the most recent run that staff have not marked done. All API
+record queries must use `config.db.queries.latest_run()` to scope records to the run with the
+newest `started_at`, breaking ties by the highest `id`. Run status does not affect selection;
+a newest run without pending tasks never falls back to an older run.
+
+```json
+{
+  "run_id": 42,
+  "tasks": [{
+    "camera": "6215", "area_id": "6215_2", "product_id": "11908",
+    "product_name": "BANANA CAT I CNT KG", "kind": "top_up",
+    "opened": { "filename": "1751052241.jpg", "ts": "2025-06-27T19:24:01Z" },
+    "closed": { "filename": "1751055841.jpg", "ts": "2025-06-27T20:24:01Z" }
+  }]
+}
+```
+
+Tasks are sorted by priority (`restock`, `move_product`, `top_up`), then by opening time.
+Closed tasks are included with their closing frame, so the time slider can tell which were
+still open at any moment; `closed` is `null` while a task is open. With no runs, the endpoint
+returns `404` with `{"detail": "No runs available"}`. Interactive API documentation is at
+`/docs`.
+
 ## Layout
 
 ```
