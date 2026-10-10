@@ -8,10 +8,13 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.20.0",
     "fastapi>=0.143.0",
     "numpy>=2.5.3",
     "opencv-python-headless>=5.0.0.93",
+    "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.0",
+    "sqlalchemy>=2.1.4",
     "typer>=0.27.3",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -42,7 +45,30 @@ line-length = 100
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
+"config/db/migrations/versions/*" = ["E501"]
 "src/*.py" = ["E501"]  # long docstrings and embedded HTML/JS pages in the pipeline scripts
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "typer.Option", "typer.Argument"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.alembic]
+script_location = "%(here)s/config/db/migrations"
+file_template = "%%(year)d_%%(month).2d_%%(day).2d_%%(hour).2d%%(minute).2d-%%(rev)s_%%(slug)s"
+prepend_sys_path = ["."]
+
+[[tool.alembic.post_write_hooks]]
+name = "ruff_format"
+type = "module"
+module = "ruff"
+options = "format REVISION_SCRIPT_FILENAME"
+
+[[tool.alembic.post_write_hooks]]
+name = "ruff_fix"
+type = "module"
+module = "ruff"
+options = "check --fix REVISION_SCRIPT_FILENAME"
+
