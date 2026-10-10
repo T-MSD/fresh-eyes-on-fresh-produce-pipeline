@@ -1,0 +1,20 @@
+# API
+fastapi==0.143.0
+uvicorn[standard]==0.54.0
+pydantic==2.14.0
+
+# Pipeline
+numpy==2.5.3
+opencv-python-headless==5.0.0.93
+typer==0.27.3
+
+# Vision models
+torch==2.14.1
+torchvision==0.29.1
+transformers==5.19.0
+open-clip-torch==3.3.0
+
+# Dev
+pytest==9.1.1
+httpx==0.28.1
+ruff==0.17.0

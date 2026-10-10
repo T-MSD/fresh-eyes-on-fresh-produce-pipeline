@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.env
+
+# OS
+.DS_Store
+
+# Dataset and pipeline outputs
+dataset/
+out/
