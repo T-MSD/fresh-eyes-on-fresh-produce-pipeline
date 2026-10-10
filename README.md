@@ -67,14 +67,33 @@ everything outside it uses `external_id`.
 Composite foreign keys keep each row inside one dataset: an area's camera and product, and a
 prediction's run, camera and detected product, all belong to the same dataset.
 
+## Loading a dataset
+
+`load` adds a planogram and its images folder (`<camera>/<unix_ts>.jpg`) as a new dataset. Each
+path comes from its argument, else from `PLANOGRAM_PATH` / `IMAGES_DIR` in `.env`.
+
+```bash
+uv run --env-file .env python cli.py load                                  # paths from .env
+uv run --env-file .env python cli.py load path/to/planogram.json path/to/images
+uv run --env-file .env python cli.py load --dry-run                        # check only
+```
+
+Both inputs are parsed and checked before the database is touched; any problem stops the load.
+The insert runs in one transaction, so a failed load leaves no partial dataset. Earlier loads,
+their runs and their predictions are never touched. Unreadable images are stored without a size; files that are not timestamped JPEGs are listed and
+skipped. A camera folder missing from the planogram stops the load.
+
 ## Layout
 
 ```
+cli.py                                  # command line: load
 config/
   db/
     connection.py                       # engine from DATABASE_URL
+    load.py                             # add a dataset load in one transaction
     schema.py                           # SQLAlchemy models (tables)
     migrations/                         # Alembic env, template and versions
+ingest/                                 # parse and check planogram + images, no database
 src/                                    # pipeline and API
 tests/
 compose.yaml                            # Postgres container
