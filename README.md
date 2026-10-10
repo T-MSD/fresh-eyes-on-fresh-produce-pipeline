@@ -66,6 +66,9 @@ planogram id (`6215`, `11908`, `6215_2`) in `external_id`, unique within one dat
 planogram can reuse the same ids in a later load. Generated ids stay inside the database;
 everything outside it uses `external_id`.
 
+Every timestamp is a `timestamptz` column of type `UTCDateTime`, so every query reads it back in
+UTC, whatever the session time zone.
+
 Composite foreign keys keep each row inside one dataset: an area's camera and product, and a
 prediction's run, camera and detected product, all belong to the same dataset.
 
@@ -111,7 +114,6 @@ a newest run without pending tasks never falls back to an older run.
 
 ```json
 {
-  "run_id": 42,
   "tasks": [{
     "camera": "6215", "area_id": "6215_2", "product_id": "11908",
     "product_name": "BANANA CAT I CNT KG", "kind": "top_up",
@@ -121,7 +123,8 @@ a newest run without pending tasks never falls back to an older run.
 }
 ```
 
-Tasks are sorted by priority (`restock`, `move_product`, `top_up`), then by opening time.
+Tasks are sorted by priority (`restock`, `move_product`, `top_up`), then by opening time,
+camera and area, with creation order breaking any remaining tie. No database id is returned.
 Closed tasks are included with their closing frame, so the time slider can tell which were
 still open at any moment; `closed` is `null` while a task is open. With no runs, the endpoint
 returns `404` with `{"detail": "No runs available"}`. Interactive API documentation is at

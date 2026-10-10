@@ -28,7 +28,6 @@ class PendingTask:
 
 @dataclass(frozen=True)
 class PendingTasks:
-    run_id: int
     tasks: list[PendingTask]
 
 
@@ -66,6 +65,7 @@ def get_pending_tasks(connection: Connection) -> PendingTasks | None:
             opened.ts,
             Camera.external_id,
             Area.number,
+            Task.id,
         )
     )
     tasks = [
@@ -80,4 +80,4 @@ def get_pending_tasks(connection: Connection) -> PendingTasks | None:
         )
         for row in connection.execute(statement)
     ]
-    return PendingTasks(run_id=run_id, tasks=tasks)
+    return PendingTasks(tasks=tasks)

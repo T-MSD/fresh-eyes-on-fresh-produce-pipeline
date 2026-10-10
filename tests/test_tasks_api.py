@@ -3,18 +3,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection
+from sqlalchemy import Connection, text
 
 from config.db.connection import get_connection
 from src.main import app
-from tests.test_db_constraints import (
+from tests.db_builders import (
     add_area,
-    add_camera,
-    add_dataset,
     add_frame,
     add_predicted_frame,
     add_prediction,
-    add_product,
     add_run,
     add_task,
 )
@@ -30,17 +27,6 @@ def client(db: Connection) -> Iterator[TestClient]:
             yield client
     finally:
         app.dependency_overrides.clear()
-
-
-@pytest.fixture
-def dataset(db: Connection) -> int:
-    return add_dataset(db)
-
-
-@pytest.fixture
-def camera(db: Connection, dataset: int) -> int:
-    add_product(db, dataset)
-    return add_camera(db, dataset, "6215")
 
 
 def iso(ts: int) -> str:
@@ -67,7 +53,6 @@ def test_lists_tasks_of_the_latest_run_not_marked_done(
 
     assert response.status_code == 200
     assert response.json() == {
-        "run_id": run_id,
         "tasks": [
             {
                 "camera": "6215",
@@ -93,6 +78,22 @@ def test_open_task_has_no_closing_frame(
     assert task["closed"] is None
 
 
+@pytest.mark.parametrize("timezone", ["UTC", "Europe/Lisbon", "America/New_York"])
+def test_frame_timestamps_are_utc_whatever_the_session_timezone(
+    db: Connection, client: TestClient, dataset: int, camera: int, timezone: str
+):
+    db.execute(text("SELECT set_config('TimeZone', :timezone, true)"), {"timezone": timezone})
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    opened, closed = (
+        add_predicted_frame(db, run_id, area_id, camera, ts) for ts in (MORNING, NOON)
+    )
+    add_task(db, run_id, area_id, opened, closed_frame_id=closed)
+
+    [task] = client.get("/tasks").json()["tasks"]
+
+    assert (task["opened"]["ts"], task["closed"]["ts"]) == (iso(MORNING), iso(NOON))
+
+
 @pytest.mark.parametrize("status", ["running", "done", "failed"])
 def test_only_latest_run_tasks_whatever_its_status(
     db: Connection, client: TestClient, dataset: int, camera: int, status
@@ -104,10 +105,9 @@ def test_only_latest_run_tasks_whatever_its_status(
         add_prediction(db, run_id, frame_id, area_id, camera)
         add_task(db, run_id, area_id, frame_id, kind=kind)
 
-    body = client.get("/tasks").json()
+    tasks = client.get("/tasks").json()["tasks"]
 
-    assert body["run_id"] == latest
-    assert [task["kind"] for task in body["tasks"]] == ["move_product"]
+    assert [task["kind"] for task in tasks] == ["move_product"]
 
 
 def test_latest_run_without_pending_tasks_never_uses_older_runs(
@@ -125,7 +125,7 @@ def test_latest_run_without_pending_tasks_never_uses_older_runs(
     response = client.get("/tasks")
 
     assert response.status_code == 200
-    assert response.json() == {"run_id": latest, "tasks": []}
+    assert response.json() == {"tasks": []}
 
 
 def test_sorts_by_priority_then_opening_time(
@@ -151,3 +151,20 @@ def test_sorts_by_priority_then_opening_time(
         ("6215_3", "move_product"),
         ("6215_1", "top_up"),
     ]
+
+
+def test_tasks_tied_on_every_other_key_keep_creation_order(
+    db: Connection, client: TestClient, dataset: int, camera: int
+):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    names = ["b.jpg", "a.jpg", "c.jpg"]
+    frames = [add_frame(db, camera, MORNING, filename=name) for name in names]
+    for frame_id in frames:
+        add_prediction(db, run_id, frame_id, area_id, camera)
+    closing = add_predicted_frame(db, run_id, area_id, camera, NOON)
+    for frame_id in frames:
+        add_task(db, run_id, area_id, frame_id, closed_frame_id=closing)
+
+    tasks = client.get("/tasks").json()["tasks"]
+
+    assert [task["opened"]["filename"] for task in tasks] == names
