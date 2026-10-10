@@ -40,7 +40,8 @@ class Base(DeclarativeBase):
 class Camera(Base):
     __tablename__ = "cameras"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    external_id: Mapped[str] = mapped_column(String, unique=True)
     name: Mapped[str | None]
 
     areas: Mapped[list["Area"]] = relationship(back_populates="camera", order_by="Area.number")
@@ -50,7 +51,8 @@ class Camera(Base):
 class Product(Base):
     __tablename__ = "products"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    external_id: Mapped[str] = mapped_column(String, unique=True)
     name: Mapped[str]
 
 
@@ -70,10 +72,11 @@ class Area(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    camera_id: Mapped[str] = mapped_column(ForeignKey("cameras.id"))
+    id: Mapped[int] = mapped_column(primary_key=True)
+    external_id: Mapped[str] = mapped_column(String, unique=True)
+    camera_id: Mapped[int] = mapped_column(ForeignKey("cameras.id"))
     number: Mapped[int]
-    product_id: Mapped[str] = mapped_column(ForeignKey("products.id"))
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
     top_left: Mapped[list[int]] = mapped_column(ARRAY(Integer))
     top_right: Mapped[list[int]] = mapped_column(ARRAY(Integer))
     bottom_right: Mapped[list[int]] = mapped_column(ARRAY(Integer))
@@ -93,7 +96,7 @@ class Frame(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    camera_id: Mapped[str] = mapped_column(ForeignKey("cameras.id"))
+    camera_id: Mapped[int] = mapped_column(ForeignKey("cameras.id"))
     filename: Mapped[str]
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     width: Mapped[int | None]
@@ -123,6 +126,7 @@ class Run(Base):
     stock_points: Mapped[int | None]
     labels_sha256: Mapped[str | None]
     labelled_areas: Mapped[int | None]
+    dataset_loaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     predictions: Mapped[list["Prediction"]] = relationship(
         back_populates="run", cascade="all, delete-orphan", passive_deletes=True
@@ -141,11 +145,11 @@ class Prediction(Base):
 
     run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True)
     frame_id: Mapped[int] = mapped_column(primary_key=True)
-    area_id: Mapped[str] = mapped_column(primary_key=True)
-    camera_id: Mapped[str]
+    area_id: Mapped[int] = mapped_column(primary_key=True)
+    camera_id: Mapped[int]
     planogram_compliant: Mapped[bool]
     stock_level: Mapped[StockLevel] = mapped_column(Enum(*get_args(StockLevel), name="stock_level"))
-    detected_product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"))
+    detected_product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"))
     compliance_confidence: Mapped[float | None]
     stock_confidence: Mapped[float | None]
     is_fallback: Mapped[bool] = mapped_column(server_default=text("false"))
@@ -158,3 +162,13 @@ class Prediction(Base):
     @property
     def stock_value(self) -> float:
         return STOCK_VALUES[self.stock_level]
+
+
+class ActiveDataset(Base):
+    __tablename__ = "active_dataset"
+    __table_args__ = (CheckConstraint("id = 1", name="single_row"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False, server_default="1")
+    planogram_path: Mapped[str]
+    images_dir: Mapped[str]
+    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
