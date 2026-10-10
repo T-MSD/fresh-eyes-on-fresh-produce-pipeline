@@ -71,3 +71,24 @@ dataset/                                # gitignored
   training/<camera_id>/<unix_ts>.jpg
 out/                                    # pipeline outputs (gitignored)
 ```
+
+## API
+
+```bash
+uv run --env-file .env uvicorn src.main:app --host 127.0.0.1 --port 8000
+```
+
+```text
+GET /predictions/{frame_id}/{area_id}/frame
+    → most recent run → matching prediction → frame metadata (JSON)
+```
+
+Predictions are identified by frame and area within the automatically selected run.
+All record endpoints must use the shared `most_recent_run` dependency and scope their
+queries to that run. The most recent run is ordered by `started_at` descending, then
+`id` descending to break ties, regardless of status. Selection happens on each request.
+A missing run or prediction returns HTTP 404; older runs are never used as a fallback.
+
+The response contains `run_id`, `id` (frame ID), `camera_id`, `filename`, `ts`,
+`width` and `height`. Dimensions can be `null`. This endpoint returns metadata;
+it does not read the frame image. Interactive API documentation is available at `/docs`.
