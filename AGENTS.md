@@ -1,0 +1,102 @@
+# AGENTS
+
+Python pipeline and API for the Sensei "Fresh eyes on fresh produce" challenge (JunctionX Lisbon 2026). For every camera image and every planogram area, the pipeline predicts `planogram_compliant`, `stock_level` and `stock_value`. The frontend lives in [fresh-eyes-on-fresh-produce-app](https://github.com/T-MSD/fresh-eyes-on-fresh-produce-app).
+
+## How you answer
+
+Lead with the answer. Be direct; no filler. Let the user ask for the reasons.
+
+To explain a flow, a structure or a change, show it: a sketch, a tree, a diagram or the type signatures. Prose supports the picture.
+
+## Essentials
+
+- **Python:** 3.12, pinned in `.python-version`. Do not change it; the vision libraries are most reliable on 3.12.
+- **Package manager:** `uv`. Add dependencies with `uv add <pkg>` (vision libraries with `uv add --optional ml <pkg>`, dev tools with `uv add --dev <pkg>`), then mirror the pinned version in `requirements.txt`.
+- **Install:** `uv sync` (core) or `uv sync --extra ml` (adds torch, transformers, open_clip).
+- **Run anything:** `uv run --env-file .env <command>`. Python does not read `.env` on its own.
+- **Lint + format:** `uv run ruff check .` and `uv run ruff format .`
+- **Tests:** `uv run pytest`
+- **Layout:** all source code sits flat in `src/`. Never add a nested package folder.
+
+## Domain vocabulary
+
+Use these exact terms in code, docs and replies.
+
+| Term | Meaning |
+|---|---|
+| Camera | A ceiling camera, keyed by its id (e.g. `6215`). One camera sees one or more gondola modules. |
+| Frame | One image from a camera, named `<unix_ts>.jpg`. |
+| Planogram | `dataset/planogram.json`: which product should occupy each area at the start of the day. |
+| Area | One planogram slot, `area_id` = `<camera>_<n>`. Defined by four corner points (TL, TR, BR, BL) in image pixels. |
+| Crop | An area cut out of a frame and warped into a straight rectangle. |
+| Compliance | Whether the product shown in the area is the one the planogram expects. |
+| Stock level | `empty` / `half` / `full`, with `stock_value` `0` / `0.5` / `1`. |
+| Reference | An unlabelled exemplar crop (early-morning "correct and full", emptiest-of-day "empty") used instead of training labels. |
+| Dev labels | Hand-made labels in the organisers' `annotations.json` format, used to score methods locally. |
+| Submission | The scored output, in the exact organiser format. |
+
+## Scoring rules
+
+Every change to prediction logic is judged against these rules. They are the product spec.
+
+| Result per area | Points |
+|---|---|
+| Compliance correct | +1 |
+| Compliance wrong | −2 |
+| Stock correct | +1 |
+| Stock below truth | −2 |
+| Stock above truth | −3 |
+| Area missing from output | −5 (counts as −2 and −3) |
+
+Consequences you must respect:
+
+1. **The submission contains every area of every frame.** A gap costs −5. Fill gaps with a fallback; never drop an area.
+2. **Compliance threshold is 50%.** The penalty is symmetric.
+3. **Stock is biased down.** Overestimating costs more than underestimating, and error size does not matter. Pick the level with the highest expected score, not the most likely level.
+4. **No method lands without a score.** Run it against the dev labels and report the before/after number.
+
+## Data contract
+
+Submission and dev labels share this shape: camera → frame filename → `area_id` → label.
+
+```json
+{ "6215": { "1751052241.jpg": { "6215_2": {
+  "planogram_compliant": true, "stock_level": "half", "stock_value": 0.5 } } } }
+```
+
+The rich predictions file for the frontend adds `ts`, `product_id`, `product_name`, `detected_product_id`, `compliance_confidence` and `stock_confidence` per area. Changing either shape is a breaking change for the frontend: update both repos together.
+
+## Dataset
+
+- **`dataset/` is read-only.** Never edit, move, rename or delete files in it. Never commit it; it is gitignored.
+- **Fix data quirks in code, never in the source file:**
+  - Area `6383_2` uses the key `productd` instead of `product_id`.
+  - Some corner coordinates are negative: the area extends past the image edge. Mask those pixels; do not clip the polygon.
+  - The same product can occupy several areas. Stock is per area.
+  - Product names ending in ` KG` are sold loose; names with a weight (`500 G`, `EMB. 3KG`) are packaged.
+- **Missing data is a stop condition.** If the dataset lacks something a task needs, stop and ask. Never generate synthetic data in its place.
+- **`labels/dev_labels.json` is human work.** Never overwrite or regenerate it. Add or change single labels only.
+
+## Non-negotiables
+
+1. **Design through the non-happy path first.** Name the failures, empty and boundary cases (area off the image edge, unreadable frame, missing planogram key) before the happy path.
+2. **Parse at the boundary, trust inside.** JSON from disk or HTTP is parsed into pydantic models before core logic sees it. Core functions take typed values, never raw dicts.
+3. **Make invalid states unrepresentable.** `stock_level` is a `Literal`, never a free string. `stock_value` is derived from `stock_level`, never set independently.
+4. **Tests verify behaviour through public functions.** No mocking of internals. Use small synthetic images and planograms built in the test.
+5. **Red → Green → Refactor** for behaviour changes.
+6. **Comments: do not write them.** Exception: a docstring on a public function when the name and types do not tell the whole story. A stale comment is a bug.
+7. **Check `pyproject.toml` before adding a dependency.** Add one only when nothing installed covers the need.
+8. **Your library knowledge is outdated.** Verify the current API (context7, the library's docs) before writing code against FastAPI, pydantic, OpenCV, torch, transformers or open_clip.
+
+## Git
+
+- **Conventional Commits**, e.g. `feat(pipeline): add dinov2 compliance check`, `fix(api): return 404 for unknown frame`.
+- **Branches** come from `main`: `feat/<short-description>`, `fix/...`, `chore/...`.
+- **PR title** = the first commit message.
+- **Never commit or push without explicit permission.** Never use `--no-verify`.
+- **Never commit** `dataset/`, `out/`, `.env` or `PLAN.md`.
+
+## Docs
+
+- **Never state counts** of files, functions, cameras, areas or images in docs. They go stale. Name the things instead. Scoring numbers and config values are fine.
+- **Sub-agents do not inherit this file.** Tell them to follow `AGENTS.md`.
