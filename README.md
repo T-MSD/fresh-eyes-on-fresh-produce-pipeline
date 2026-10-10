@@ -80,8 +80,13 @@ uv run --env-file .env python cli.py load --dry-run                        # che
 
 Both inputs are parsed and checked before the database is touched; any problem stops the load.
 The insert runs in one transaction, so a failed load leaves no partial dataset. Earlier loads,
-their runs and their predictions are never touched. Unreadable images are stored without a size; files that are not timestamped JPEGs are listed and
-skipped. A camera folder missing from the planogram stops the load.
+their runs and their predictions are never touched. A camera folder missing from the planogram
+stops the load; files that are not timestamped JPEGs are listed and skipped.
+
+An image is unreadable when its JPEG header is missing or broken, declares a size of zero or
+above `MAX_FRAME_PIXELS` (checked before decoding, so a bad header cannot allocate gigabytes), or
+does not decode to the size it declares. Unreadable images are listed and stored without a size,
+so their areas still get a fallback.
 
 ## Layout
 

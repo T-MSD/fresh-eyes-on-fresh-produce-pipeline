@@ -4,7 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from cli import app
-from tests.builders import area, write_dataset
+from tests.builders import area, write_dataset, write_frame_bytes
 
 NO_PATHS = {"PLANOGRAM_PATH": None, "IMAGES_DIR": None}
 
@@ -33,6 +33,17 @@ def test_dry_run_checks_the_dataset_from_arguments(paths):
     assert "2 cameras, 1 products, 3 areas, 1 frames (0 unreadable)" in result.output
     assert "camera 6383 has no frames" in result.output
     assert "database not changed" in result.output
+
+
+def test_lists_unreadable_frames(paths):
+    planogram_path, images_dir = paths
+    broken = write_frame_bytes(images_dir, "6383", 1751052241, b"not an image")
+
+    result = run(str(planogram_path), str(images_dir), "--dry-run")
+
+    assert result.exit_code == 0, result.output
+    assert "2 frames (1 unreadable)" in result.output
+    assert f"unreadable {broken.resolve()}" in result.output
 
 
 def test_falls_back_to_environment_paths(paths):

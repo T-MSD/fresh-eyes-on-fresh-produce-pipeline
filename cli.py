@@ -76,12 +76,14 @@ def load(
 
 def print_dataset(dataset: Dataset) -> None:
     planogram = dataset.planogram
-    unreadable = sum(frame.size is None for frame in dataset.frames)
+    unreadable = [frame for frame in dataset.frames if frame.size is None]
     typer.echo(
         f"store      {planogram.store}: {len(planogram.cameras)} cameras,"
         f" {len(planogram.products)} products, {len(planogram.areas)} areas,"
-        f" {len(dataset.frames)} frames ({unreadable} unreadable)"
+        f" {len(dataset.frames)} frames ({len(unreadable)} unreadable)"
     )
+    for frame in unreadable:
+        typer.echo(f"unreadable {dataset.images_dir / frame.camera / frame.filename}")
     for path in dataset.skipped:
         typer.echo(f"skipped    {path}")
     for camera in dataset.cameras_without_frames:

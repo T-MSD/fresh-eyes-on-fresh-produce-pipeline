@@ -37,10 +37,26 @@ def planogram_json(
     return json.dumps(stores).encode()
 
 
+def encode(width: int = 4, height: int = 3, extension: str = ".jpg") -> bytes:
+    ok, encoded = cv2.imencode(extension, np.zeros((height, width, 3), dtype=np.uint8))
+    assert ok
+    return encoded.tobytes()
+
+
+def declare_size(jpeg: bytes, width: int, height: int) -> bytes:
+    """Rewrite the size in a baseline JPEG header, leaving the image data as it was."""
+    sof = jpeg.index(b"\xff\xc0")
+    return jpeg[: sof + 5] + height.to_bytes(2, "big") + width.to_bytes(2, "big") + jpeg[sof + 9 :]
+
+
 def write_frame(images_dir: Path, camera: str, ts: int, width: int = 4, height: int = 3) -> Path:
+    return write_frame_bytes(images_dir, camera, ts, encode(width, height))
+
+
+def write_frame_bytes(images_dir: Path, camera: str, ts: int, data: bytes) -> Path:
     path = images_dir / camera / f"{ts}.jpg"
     path.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(path), np.zeros((height, width, 3), dtype=np.uint8))
+    path.write_bytes(data)
     return path
 
 

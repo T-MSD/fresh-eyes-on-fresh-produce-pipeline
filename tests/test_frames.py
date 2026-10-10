@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from ingest.frames import FrameFile, scan_frames
-from tests.builders import write_frame
+from tests.builders import declare_size, encode, write_frame, write_frame_bytes
 
 
 def test_finds_frames_per_camera_with_timestamp_and_size(tmp_path: Path):
@@ -29,15 +31,39 @@ def test_finds_frames_per_camera_with_timestamp_and_size(tmp_path: Path):
     assert scan.skipped == ()
 
 
-def test_keeps_unreadable_image_without_size(tmp_path: Path):
-    path = tmp_path / "6215" / "1751052241.jpg"
-    path.parent.mkdir()
-    path.write_bytes(b"not an image")
+VALID = encode(width=8, height=6)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param(b"", id="empty"),
+        pytest.param(b"not an image", id="not-an-image"),
+        pytest.param(b"\xff\xd8", id="start-marker-only"),
+        pytest.param(VALID[: VALID.index(b"\xff\xc0") + 6], id="header-cut-in-size"),
+        pytest.param(VALID[: len(VALID) // 2], id="data-cut-off"),
+        pytest.param(declare_size(VALID, 0, 0), id="declares-zero-size"),
+        pytest.param(declare_size(VALID, 30000, 30000), id="declares-oversized"),
+        pytest.param(declare_size(VALID, 65535, 48), id="declares-huge-width"),
+        pytest.param(encode(extension=".png"), id="png-named-jpg"),
+    ],
+)
+def test_keeps_unreadable_image_without_size(tmp_path: Path, data: bytes):
+    write_frame_bytes(tmp_path, "6215", 1751052241, data)
 
     (frame,) = scan_frames(tmp_path).frames
 
     assert frame.filename == "1751052241.jpg"
     assert frame.size is None
+
+
+def test_reads_size_of_jpeg_with_extra_segments_before_the_frame_header(tmp_path: Path):
+    comment = b"\xff\xfe\x00\x08camera"
+    write_frame_bytes(tmp_path, "6215", 1751052241, VALID[:2] + comment + VALID[2:])
+
+    (frame,) = scan_frames(tmp_path).frames
+
+    assert frame.size == (8, 6)
 
 
 def test_accepts_jpg_and_jpeg_in_any_case_and_keeps_the_filename(tmp_path: Path):
