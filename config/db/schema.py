@@ -10,7 +10,6 @@ from sqlalchemy import (
     Index,
     Integer,
     MetaData,
-    String,
     UniqueConstraint,
     func,
     text,
@@ -37,11 +36,25 @@ class Base(DeclarativeBase):
     )
 
 
-class Camera(Base):
-    __tablename__ = "cameras"
+class Dataset(Base):
+    __tablename__ = "datasets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    external_id: Mapped[str] = mapped_column(String, unique=True)
+    planogram_path: Mapped[str]
+    images_dir: Mapped[str]
+    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Camera(Base):
+    __tablename__ = "cameras"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "external_id"),
+        UniqueConstraint("id", "dataset_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id"))
+    external_id: Mapped[str]
     name: Mapped[str | None]
 
     areas: Mapped[list["Area"]] = relationship(back_populates="camera", order_by="Area.number")
@@ -50,15 +63,23 @@ class Camera(Base):
 
 class Product(Base):
     __tablename__ = "products"
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "external_id"),
+        UniqueConstraint("id", "dataset_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    external_id: Mapped[str] = mapped_column(String, unique=True)
+    dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id"))
+    external_id: Mapped[str]
     name: Mapped[str]
 
 
 class Area(Base):
     __tablename__ = "areas"
     __table_args__ = (
+        ForeignKeyConstraint(["camera_id", "dataset_id"], ["cameras.id", "cameras.dataset_id"]),
+        ForeignKeyConstraint(["product_id", "dataset_id"], ["products.id", "products.dataset_id"]),
+        UniqueConstraint("dataset_id", "external_id"),
         UniqueConstraint("camera_id", "number"),
         UniqueConstraint("id", "camera_id"),
         CheckConstraint("number > 0", name="number_positive"),
@@ -73,17 +94,18 @@ class Area(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    external_id: Mapped[str] = mapped_column(String, unique=True)
-    camera_id: Mapped[int] = mapped_column(ForeignKey("cameras.id"))
+    dataset_id: Mapped[int]
+    external_id: Mapped[str]
+    camera_id: Mapped[int]
     number: Mapped[int]
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
+    product_id: Mapped[int]
     top_left: Mapped[list[int]] = mapped_column(ARRAY(Integer))
     top_right: Mapped[list[int]] = mapped_column(ARRAY(Integer))
     bottom_right: Mapped[list[int]] = mapped_column(ARRAY(Integer))
     bottom_left: Mapped[list[int]] = mapped_column(ARRAY(Integer))
 
     camera: Mapped[Camera] = relationship(back_populates="areas")
-    product: Mapped[Product] = relationship()
+    product: Mapped[Product] = relationship(overlaps="areas,camera")
 
 
 class Frame(Base):
@@ -108,11 +130,13 @@ class Frame(Base):
 class Run(Base):
     __tablename__ = "runs"
     __table_args__ = (
+        UniqueConstraint("id", "dataset_id"),
         CheckConstraint("score <= 2 * labelled_areas", name="score_within_max"),
         CheckConstraint("labelled_areas >= 0", name="labelled_areas_non_negative"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id"))
     method: Mapped[str]
     git_sha: Mapped[str | None]
     params: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
@@ -126,7 +150,6 @@ class Run(Base):
     stock_points: Mapped[int | None]
     labels_sha256: Mapped[str | None]
     labelled_areas: Mapped[int | None]
-    dataset_loaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     predictions: Mapped[list["Prediction"]] = relationship(
         back_populates="run", cascade="all, delete-orphan", passive_deletes=True
@@ -136,20 +159,28 @@ class Run(Base):
 class Prediction(Base):
     __tablename__ = "predictions"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["run_id", "dataset_id"], ["runs.id", "runs.dataset_id"], ondelete="CASCADE"
+        ),
+        ForeignKeyConstraint(["camera_id", "dataset_id"], ["cameras.id", "cameras.dataset_id"]),
         ForeignKeyConstraint(["frame_id", "camera_id"], ["frames.id", "frames.camera_id"]),
         ForeignKeyConstraint(["area_id", "camera_id"], ["areas.id", "areas.camera_id"]),
+        ForeignKeyConstraint(
+            ["detected_product_id", "dataset_id"], ["products.id", "products.dataset_id"]
+        ),
         Index("ix_predictions_run_id_area_id", "run_id", "area_id"),
         CheckConstraint("compliance_confidence BETWEEN 0 AND 1", name="compliance_confidence_unit"),
         CheckConstraint("stock_confidence BETWEEN 0 AND 1", name="stock_confidence_unit"),
     )
 
-    run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True)
+    run_id: Mapped[int] = mapped_column(primary_key=True)
     frame_id: Mapped[int] = mapped_column(primary_key=True)
     area_id: Mapped[int] = mapped_column(primary_key=True)
+    dataset_id: Mapped[int]
     camera_id: Mapped[int]
     planogram_compliant: Mapped[bool]
     stock_level: Mapped[StockLevel] = mapped_column(Enum(*get_args(StockLevel), name="stock_level"))
-    detected_product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"))
+    detected_product_id: Mapped[int | None]
     compliance_confidence: Mapped[float | None]
     stock_confidence: Mapped[float | None]
     is_fallback: Mapped[bool] = mapped_column(server_default=text("false"))
@@ -157,18 +188,8 @@ class Prediction(Base):
     run: Mapped[Run] = relationship(back_populates="predictions")
     frame: Mapped[Frame] = relationship()
     area: Mapped[Area] = relationship(overlaps="frame")
-    detected_product: Mapped[Product | None] = relationship()
+    detected_product: Mapped[Product | None] = relationship(overlaps="predictions,run")
 
     @property
     def stock_value(self) -> float:
         return STOCK_VALUES[self.stock_level]
-
-
-class ActiveDataset(Base):
-    __tablename__ = "active_dataset"
-    __table_args__ = (CheckConstraint("id = 1", name="single_row"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=False, server_default="1")
-    planogram_path: Mapped[str]
-    images_dir: Mapped[str]
-    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

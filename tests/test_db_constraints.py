@@ -7,7 +7,7 @@ from alembic import command
 from sqlalchemy import Connection, Engine, delete, func, insert, select
 from sqlalchemy.exc import IntegrityError
 
-from config.db.schema import ActiveDataset, Area, Camera, Frame, Prediction, Product, Run
+from config.db.schema import Area, Camera, Dataset, Frame, Prediction, Product, Run
 from tests.conftest import alembic_config
 
 CORNERS = {
@@ -18,26 +18,38 @@ CORNERS = {
 }
 
 
-def add_camera(db: Connection, external_id: str) -> int:
+def add_dataset(db: Connection, **overrides: Any) -> int:
+    values = {"planogram_path": "/data/planogram.json", "images_dir": "/data/training", **overrides}
+    return db.execute(insert(Dataset).values(**values).returning(Dataset.id)).scalar_one()
+
+
+def add_camera(db: Connection, dataset_id: int, external_id: str) -> int:
     return db.execute(
-        insert(Camera).values(external_id=external_id).returning(Camera.id)
+        insert(Camera).values(dataset_id=dataset_id, external_id=external_id).returning(Camera.id)
     ).scalar_one()
 
 
-def add_product(db: Connection, external_id: str = "11908") -> int:
+def add_product(db: Connection, dataset_id: int, external_id: str = "11908") -> int:
     return db.execute(
         insert(Product)
-        .values(external_id=external_id, name="BANANA CAT I CNT KG")
+        .values(dataset_id=dataset_id, external_id=external_id, name="BANANA CAT I CNT KG")
         .returning(Product.id)
     ).scalar_one()
 
 
 def add_area(db: Connection, camera_id: int, number: int, **overrides: Any) -> int:
+    dataset_id, camera = db.execute(
+        select(Camera.dataset_id, Camera.external_id).where(Camera.id == camera_id)
+    ).one()
+    product_id = db.scalar(
+        select(Product.id).where(Product.dataset_id == dataset_id, Product.external_id == "11908")
+    )
     values = {
-        "external_id": f"{camera_id}_{number}",
+        "dataset_id": dataset_id,
+        "external_id": f"{camera}_{number}",
         "camera_id": camera_id,
         "number": number,
-        "product_id": db.scalar(select(Product.id).where(Product.external_id == "11908")),
+        "product_id": product_id,
         **CORNERS,
         **overrides,
     }
@@ -56,8 +68,8 @@ def add_frame(db: Connection, camera_id: int, ts: int = 1751052241, **overrides:
     return db.execute(insert(Frame).values(**values).returning(Frame.id)).scalar_one()
 
 
-def add_run(db: Connection, **overrides: Any) -> int:
-    values = {"method": "reference", **overrides}
+def add_run(db: Connection, dataset_id: int, **overrides: Any) -> int:
+    values = {"dataset_id": dataset_id, "method": "reference", **overrides}
     return db.execute(insert(Run).values(**values).returning(Run.id)).scalar_one()
 
 
@@ -66,6 +78,7 @@ def add_prediction(
 ) -> None:
     values = {
         "run_id": run_id,
+        "dataset_id": db.scalar(select(Camera.dataset_id).where(Camera.id == camera_id)),
         "frame_id": frame_id,
         "area_id": area_id,
         "camera_id": camera_id,
@@ -76,11 +89,6 @@ def add_prediction(
         **overrides,
     }
     db.execute(insert(Prediction).values(**values))
-
-
-def set_active_dataset(db: Connection, **overrides: Any) -> None:
-    values = {"planogram_path": "/data/planogram.json", "images_dir": "/data/training", **overrides}
-    db.execute(insert(ActiveDataset).values(**values))
 
 
 def assert_rejected(
@@ -94,9 +102,14 @@ def assert_rejected(
 
 
 @pytest.fixture
-def camera(db: Connection) -> int:
-    add_product(db)
-    return add_camera(db, "6215")
+def dataset(db: Connection) -> int:
+    return add_dataset(db)
+
+
+@pytest.fixture
+def camera(db: Connection, dataset: int) -> int:
+    add_product(db, dataset)
+    return add_camera(db, dataset, "6215")
 
 
 def test_migrations_match_models(engine: Engine):
@@ -111,27 +124,64 @@ def test_migrations_downgrade_to_base_and_back(engine: Engine):
         transaction.rollback()
 
 
-def test_database_generates_primary_keys(db: Connection):
-    first, second = add_camera(db, "6215"), add_camera(db, "6383")
+def test_database_generates_primary_keys(db: Connection, dataset: int):
+    first, second = add_camera(db, dataset, "6215"), add_camera(db, dataset, "6383")
     assert isinstance(first, int)
     assert second != first
+
+
+def test_dataset_records_paths_and_load_time(db: Connection):
+    dataset_id = add_dataset(db)
+    stored = db.execute(select(Dataset).where(Dataset.id == dataset_id)).one()
+    assert stored.planogram_path == "/data/planogram.json"
+    assert stored.images_dir == "/data/training"
+    assert stored.loaded_at is not None
 
 
 @pytest.mark.parametrize(
     ("add", "constraint"),
     [
-        (lambda db, camera: add_camera(db, "6215"), "uq_cameras_external_id"),
-        (lambda db, camera: add_product(db, "11908"), "uq_products_external_id"),
         (
-            lambda db, camera: add_area(db, camera, 2, external_id=f"{camera}_1"),
-            "uq_areas_external_id",
+            lambda db, dataset, camera: add_camera(db, dataset, "6215"),
+            "uq_cameras_dataset_id_external_id",
+        ),
+        (
+            lambda db, dataset, camera: add_product(db, dataset),
+            "uq_products_dataset_id_external_id",
+        ),
+        (
+            lambda db, dataset, camera: add_area(db, camera, 2, external_id="6215_1"),
+            "uq_areas_dataset_id_external_id",
         ),
     ],
     ids=["camera", "product", "area"],
 )
-def test_external_id_is_unique(db: Connection, camera: int, add, constraint):
+def test_external_id_is_unique_within_a_dataset(
+    db: Connection, dataset: int, camera: int, add, constraint
+):
     add_area(db, camera, 1)
-    assert_rejected(db, constraint, add, camera)
+    assert_rejected(db, constraint, add, dataset, camera)
+
+
+def test_external_id_can_repeat_across_datasets(db: Connection, camera: int):
+    add_area(db, camera, 1)
+    later = add_dataset(db)
+    add_product(db, later)
+    add_area(db, add_camera(db, later, "6215"), 1)
+    assert list(db.scalars(select(Area.external_id))) == ["6215_1", "6215_1"]
+
+
+def test_area_rejects_product_from_another_dataset(db: Connection, camera: int):
+    product = add_product(db, add_dataset(db))
+    assert_rejected(db, "fk_areas_product_id_products", add_area, camera, 1, product_id=product)
+
+
+def test_area_rejects_dataset_other_than_its_cameras(db: Connection, camera: int):
+    later = add_dataset(db)
+    product = add_product(db, later)
+    assert_rejected(
+        db, "fk_areas_camera_id_cameras", add_area, camera, 1, dataset_id=later, product_id=product
+    )
 
 
 @pytest.mark.parametrize("point", [[299, 350], [-12, 350], [640, -3]])
@@ -158,9 +208,9 @@ def test_frame_filename_is_unique_per_camera(db: Connection, camera: int):
     assert_rejected(db, "uq_frames_camera_id_filename", add_frame, camera)
 
 
-def test_frame_filename_can_repeat_across_cameras(db: Connection, camera: int):
+def test_frame_filename_can_repeat_across_cameras(db: Connection, dataset: int, camera: int):
     add_frame(db, camera)
-    add_frame(db, add_camera(db, "6383"))
+    add_frame(db, add_camera(db, dataset, "6383"))
 
 
 @pytest.mark.parametrize(("width", "height"), [(1280, None), (None, 720)])
@@ -174,29 +224,81 @@ def test_frame_without_size_marks_it_unreadable(db: Connection, camera: int):
     add_frame(db, camera, width=None, height=None)
 
 
-def test_prediction_accepts_frame_and_area_of_same_camera(db: Connection, camera: int):
-    add_prediction(db, add_run(db), add_frame(db, camera), add_area(db, camera, 1), camera)
+def test_prediction_accepts_frame_and_area_of_same_camera(
+    db: Connection, dataset: int, camera: int
+):
+    add_prediction(db, add_run(db, dataset), add_frame(db, camera), add_area(db, camera, 1), camera)
 
 
-def test_prediction_rejects_area_from_another_camera(db: Connection, camera: int):
-    other = add_camera(db, "6383")
-    run_id, frame_id, area_id = add_run(db), add_frame(db, camera), add_area(db, other, 1)
+def test_prediction_rejects_area_from_another_camera(db: Connection, dataset: int, camera: int):
+    other = add_camera(db, dataset, "6383")
+    run_id, frame_id, area_id = add_run(db, dataset), add_frame(db, camera), add_area(db, other, 1)
     ids = (run_id, frame_id, area_id)
     assert_rejected(db, "fk_predictions_area_id_areas", add_prediction, *ids, camera)
     assert_rejected(db, "fk_predictions_frame_id_frames", add_prediction, *ids, other)
 
 
-def test_prediction_rejects_camera_that_owns_neither(db: Connection, camera: int):
-    other = add_camera(db, "6383")
-    run_id, frame_id, area_id = add_run(db), add_frame(db, camera), add_area(db, camera, 1)
+def test_prediction_rejects_camera_that_owns_neither(db: Connection, dataset: int, camera: int):
+    other = add_camera(db, dataset, "6383")
+    run_id, frame_id, area_id = add_run(db, dataset), add_frame(db, camera), add_area(db, camera, 1)
     both = {"fk_predictions_area_id_areas", "fk_predictions_frame_id_frames"}
     assert_rejected(db, both, add_prediction, run_id, frame_id, area_id, other)
 
 
+def test_prediction_rejects_run_from_another_dataset(db: Connection, camera: int):
+    run_id = add_run(db, add_dataset(db))
+    frame_id, area_id = add_frame(db, camera), add_area(db, camera, 1)
+    assert_rejected(
+        db, "fk_predictions_run_id_runs", add_prediction, run_id, frame_id, area_id, camera
+    )
+
+
+def test_prediction_rejects_dataset_other_than_its_cameras(db: Connection, camera: int):
+    later = add_dataset(db)
+    run_id, frame_id, area_id = add_run(db, later), add_frame(db, camera), add_area(db, camera, 1)
+    assert_rejected(
+        db,
+        "fk_predictions_camera_id_cameras",
+        add_prediction,
+        run_id,
+        frame_id,
+        area_id,
+        camera,
+        dataset_id=later,
+    )
+
+
+def test_prediction_accepts_detected_product_of_its_dataset(
+    db: Connection, dataset: int, camera: int
+):
+    product = add_product(db, dataset, "20923")
+    run_id, frame_id, area_id = add_run(db, dataset), add_frame(db, camera), add_area(db, camera, 1)
+    add_prediction(db, run_id, frame_id, area_id, camera, detected_product_id=product)
+
+
+def test_prediction_rejects_detected_product_from_another_dataset(
+    db: Connection, dataset: int, camera: int
+):
+    product = add_product(db, add_dataset(db))
+    run_id, frame_id, area_id = add_run(db, dataset), add_frame(db, camera), add_area(db, camera, 1)
+    assert_rejected(
+        db,
+        "fk_predictions_detected_product_id_products",
+        add_prediction,
+        run_id,
+        frame_id,
+        area_id,
+        camera,
+        detected_product_id=product,
+    )
+
+
 @pytest.mark.parametrize("field", ["compliance_confidence", "stock_confidence"])
 @pytest.mark.parametrize("value", [-0.01, 1.01])
-def test_prediction_confidence_is_within_zero_and_one(db: Connection, camera: int, field, value):
-    run_id, frame_id, area_id = add_run(db), add_frame(db, camera), add_area(db, camera, 1)
+def test_prediction_confidence_is_within_zero_and_one(
+    db: Connection, dataset: int, camera: int, field, value
+):
+    run_id, frame_id, area_id = add_run(db, dataset), add_frame(db, camera), add_area(db, camera, 1)
     assert_rejected(
         db,
         f"ck_predictions_{field}_unit",
@@ -217,15 +319,17 @@ def test_prediction_confidence_is_within_zero_and_one(db: Connection, camera: in
         {"compliance_confidence", "stock_confidence"},
     ],
 )
-def test_prediction_without_confidence_estimate_is_stored(db: Connection, camera: int, missing):
-    run_id, frame_id, area_id = add_run(db), add_frame(db, camera), add_area(db, camera, 1)
+def test_prediction_without_confidence_estimate_is_stored(
+    db: Connection, dataset: int, camera: int, missing
+):
+    run_id, frame_id, area_id = add_run(db, dataset), add_frame(db, camera), add_area(db, camera, 1)
     add_prediction(db, run_id, frame_id, area_id, camera, **dict.fromkeys(missing))
     stored = db.execute(select(Prediction.compliance_confidence, Prediction.stock_confidence)).one()
     assert {field for field, value in stored._asdict().items() if value is None} == missing
 
 
-def test_deleting_run_deletes_its_predictions(db: Connection, camera: int):
-    run_id = add_run(db)
+def test_deleting_run_deletes_its_predictions(db: Connection, dataset: int, camera: int):
+    run_id = add_run(db, dataset)
     add_prediction(db, run_id, add_frame(db, camera), add_area(db, camera, 1), camera)
 
     db.execute(delete(Run).where(Run.id == run_id))
@@ -233,30 +337,14 @@ def test_deleting_run_deletes_its_predictions(db: Connection, camera: int):
     assert db.scalar(select(func.count()).select_from(Prediction)) == 0
 
 
-def test_run_score_cannot_exceed_two_points_per_labelled_area(db: Connection):
-    add_run(db, score=20, labelled_areas=10)
-    assert_rejected(db, "ck_runs_score_within_max", add_run, score=21, labelled_areas=10)
+def test_run_rejects_unknown_dataset(db: Connection):
+    assert_rejected(db, "fk_runs_dataset_id_datasets", add_run, -1)
 
 
-def test_run_labelled_areas_cannot_be_negative(db: Connection):
-    assert_rejected(db, "ck_runs_labelled_areas_non_negative", add_run, labelled_areas=-1)
+def test_run_score_cannot_exceed_two_points_per_labelled_area(db: Connection, dataset: int):
+    add_run(db, dataset, score=20, labelled_areas=10)
+    assert_rejected(db, "ck_runs_score_within_max", add_run, dataset, score=21, labelled_areas=10)
 
 
-def test_run_records_the_dataset_load_it_ran_on(db: Connection):
-    loaded_at = datetime(2026, 10, 10, 18, 0, tzinfo=UTC)
-    run_id = add_run(db, dataset_loaded_at=loaded_at)
-    assert db.scalar(select(Run.dataset_loaded_at).where(Run.id == run_id)) == loaded_at
-
-
-def test_active_dataset_records_paths_and_load_time(db: Connection):
-    set_active_dataset(db)
-    stored = db.execute(select(ActiveDataset)).one()
-    assert stored.planogram_path == "/data/planogram.json"
-    assert stored.images_dir == "/data/training"
-    assert stored.loaded_at is not None
-
-
-def test_active_dataset_holds_at_most_one_row(db: Connection):
-    set_active_dataset(db)
-    assert_rejected(db, "pk_active_dataset", set_active_dataset)
-    assert_rejected(db, "ck_active_dataset_single_row", set_active_dataset, id=2)
+def test_run_labelled_areas_cannot_be_negative(db: Connection, dataset: int):
+    assert_rejected(db, "ck_runs_labelled_areas_non_negative", add_run, dataset, labelled_areas=-1)
