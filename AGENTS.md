@@ -15,8 +15,9 @@ To explain a flow, a structure or a change, show it: a sketch, a tree, a diagram
 - **Install:** `uv sync` (core) or `uv sync --extra ml` (adds torch, transformers, open_clip).
 - **Run anything:** `uv run --env-file .env <command>`. Python does not read `.env` on its own.
 - **Lint + format:** `uv run ruff check .` and `uv run ruff format .`
-- **Tests:** `uv run pytest`
-- **Layout:** all source code sits flat in `src/`. Never add a nested package folder.
+- **Tests:** `uv run --env-file .env pytest`. Database tests need `TEST_DATABASE_URL`; they drop and recreate that database, so its name must end in `_test`. Without it they are skipped.
+- **Layout:** group code by concern in nested packages, imported from the repo root (`from config.db.schema import Area`). Everything database-related lives in `config/db/`: `connection.py` (engine), `schema.py` (SQLAlchemy models, one class per table) and `migrations/` (Alembic). `compose.yaml` stays at the root.
+- **Migrations:** after editing `config/db/schema.py`, run `uv run --env-file .env alembic revision --autogenerate -m "<change>"`, review the generated file, then `alembic upgrade head` and `alembic check`.
 
 ## Domain vocabulary
 
@@ -64,7 +65,7 @@ Submission and dev labels share this shape: camera → frame filename → `area_
   "planogram_compliant": true, "stock_level": "half", "stock_value": 0.5 } } } }
 ```
 
-The rich predictions file for the frontend adds `ts`, `product_id`, `product_name`, `detected_product_id`, `compliance_confidence` and `stock_confidence` per area. Changing either shape is a breaking change for the frontend: update both repos together.
+The rich predictions file for the frontend adds `ts`, `product_id`, `product_name`, `detected_product_id`, `compliance_confidence` and `stock_confidence` per area. A confidence is `null` when the method gives no estimate (fallbacks included); never invent one. The frontend shows `null` as unsure. Changing either shape is a breaking change for the frontend: update both repos together.
 
 ## Dataset
 

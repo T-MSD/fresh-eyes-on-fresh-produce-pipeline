@@ -6,6 +6,6 @@
 4. The submission contains every area of every frame. Never drop an area.
 5. No prediction change lands without a before/after score on the dev labels.
 6. Never commit or push without explicit permission.
-7. Run Python through `uv run --env-file .env`. Keep all source flat in `src/`.
+7. Run Python through `uv run --env-file .env`. Everything database-related lives in `config/db/`.
 
 @./AGENTS.md
