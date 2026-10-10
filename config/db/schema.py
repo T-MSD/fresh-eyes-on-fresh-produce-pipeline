@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     MetaData,
@@ -57,6 +58,7 @@ class Area(Base):
     __tablename__ = "areas"
     __table_args__ = (
         UniqueConstraint("camera_id", "number"),
+        UniqueConstraint("id", "camera_id"),
         CheckConstraint("number > 0", name="number_positive"),
         *(
             CheckConstraint(
@@ -85,6 +87,7 @@ class Frame(Base):
     __tablename__ = "frames"
     __table_args__ = (
         UniqueConstraint("camera_id", "filename"),
+        UniqueConstraint("id", "camera_id"),
         Index("ix_frames_camera_id_ts", "camera_id", "ts"),
         CheckConstraint("(width IS NULL) = (height IS NULL)", name="size_both_or_neither"),
     )
@@ -129,14 +132,17 @@ class Run(Base):
 class Prediction(Base):
     __tablename__ = "predictions"
     __table_args__ = (
+        ForeignKeyConstraint(["frame_id", "camera_id"], ["frames.id", "frames.camera_id"]),
+        ForeignKeyConstraint(["area_id", "camera_id"], ["areas.id", "areas.camera_id"]),
         Index("ix_predictions_run_id_area_id", "run_id", "area_id"),
         CheckConstraint("compliance_confidence BETWEEN 0 AND 1", name="compliance_confidence_unit"),
         CheckConstraint("stock_confidence BETWEEN 0 AND 1", name="stock_confidence_unit"),
     )
 
     run_id: Mapped[int] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True)
-    frame_id: Mapped[int] = mapped_column(ForeignKey("frames.id"), primary_key=True)
-    area_id: Mapped[str] = mapped_column(ForeignKey("areas.id"), primary_key=True)
+    frame_id: Mapped[int] = mapped_column(primary_key=True)
+    area_id: Mapped[str] = mapped_column(primary_key=True)
+    camera_id: Mapped[str]
     planogram_compliant: Mapped[bool]
     stock_level: Mapped[StockLevel] = mapped_column(Enum(*get_args(StockLevel), name="stock_level"))
     detected_product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"))
@@ -146,7 +152,7 @@ class Prediction(Base):
 
     run: Mapped[Run] = relationship(back_populates="predictions")
     frame: Mapped[Frame] = relationship()
-    area: Mapped[Area] = relationship()
+    area: Mapped[Area] = relationship(overlaps="frame")
     detected_product: Mapped[Product | None] = relationship()
 
     @property

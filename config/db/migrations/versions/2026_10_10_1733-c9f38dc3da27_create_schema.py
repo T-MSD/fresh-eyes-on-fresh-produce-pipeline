@@ -1,8 +1,8 @@
 """create schema
 
-Revision ID: e3437a112622
+Revision ID: c9f38dc3da27
 Revises:
-Create Date: 2026-10-10 17:10:38.694108
+Create Date: 2026-10-10 17:33:25.532304
 
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "e3437a112622"
+revision: str = "c9f38dc3da27"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -99,6 +99,7 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_areas")),
         sa.UniqueConstraint("camera_id", "number", name=op.f("uq_areas_camera_id_number")),
+        sa.UniqueConstraint("id", "camera_id", name=op.f("uq_areas_id_camera_id")),
     )
     op.create_table(
         "frames",
@@ -116,6 +117,7 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_frames")),
         sa.UniqueConstraint("camera_id", "filename", name=op.f("uq_frames_camera_id_filename")),
+        sa.UniqueConstraint("id", "camera_id", name=op.f("uq_frames_id_camera_id")),
     )
     op.create_index("ix_frames_camera_id_ts", "frames", ["camera_id", "ts"], unique=False)
     op.create_table(
@@ -123,6 +125,7 @@ def upgrade() -> None:
         sa.Column("run_id", sa.Integer(), nullable=False),
         sa.Column("frame_id", sa.Integer(), nullable=False),
         sa.Column("area_id", sa.String(), nullable=False),
+        sa.Column("camera_id", sa.String(), nullable=False),
         sa.Column("planogram_compliant", sa.Boolean(), nullable=False),
         sa.Column(
             "stock_level", sa.Enum("empty", "half", "full", name="stock_level"), nullable=False
@@ -139,7 +142,9 @@ def upgrade() -> None:
             "stock_confidence BETWEEN 0 AND 1", name=op.f("ck_predictions_stock_confidence_unit")
         ),
         sa.ForeignKeyConstraint(
-            ["area_id"], ["areas.id"], name=op.f("fk_predictions_area_id_areas")
+            ["area_id", "camera_id"],
+            ["areas.id", "areas.camera_id"],
+            name=op.f("fk_predictions_area_id_areas"),
         ),
         sa.ForeignKeyConstraint(
             ["detected_product_id"],
@@ -147,7 +152,9 @@ def upgrade() -> None:
             name=op.f("fk_predictions_detected_product_id_products"),
         ),
         sa.ForeignKeyConstraint(
-            ["frame_id"], ["frames.id"], name=op.f("fk_predictions_frame_id_frames")
+            ["frame_id", "camera_id"],
+            ["frames.id", "frames.camera_id"],
+            name=op.f("fk_predictions_frame_id_frames"),
         ),
         sa.ForeignKeyConstraint(
             ["run_id"], ["runs.id"], name=op.f("fk_predictions_run_id_runs"), ondelete="CASCADE"
