@@ -19,4 +19,10 @@ wheels/
 
 # Dataset and pipeline outputs
 dataset/
-out/
+out/*
+# small hand-made inputs and the two submission candidates; everything else under out/ is regenerated
+!out/labels.json
+!out/fill_labels.json
+!out/product_groups.json
+!out/final_predictions.json
+!out/final_predictions.before_hybrid.json
