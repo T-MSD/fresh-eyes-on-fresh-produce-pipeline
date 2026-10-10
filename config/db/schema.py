@@ -19,6 +19,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 StockLevel = Literal["empty", "half", "full"]
 RunStatus = Literal["running", "done", "failed"]
+TaskKind = Literal["restock", "move_product", "top_up"]
 
 STOCK_VALUES: dict[StockLevel, float] = {"empty": 0.0, "half": 0.5, "full": 1.0}
 CORNERS = ("top_left", "top_right", "bottom_right", "bottom_left")
@@ -193,3 +194,28 @@ class Prediction(Base):
     @property
     def stock_value(self) -> float:
         return STOCK_VALUES[self.stock_level]
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+    __table_args__ = (
+        ForeignKeyConstraint(["area_id", "camera_id"], ["areas.id", "areas.camera_id"]),
+        ForeignKeyConstraint(["opened_frame_id", "camera_id"], ["frames.id", "frames.camera_id"]),
+        ForeignKeyConstraint(["closed_frame_id", "camera_id"], ["frames.id", "frames.camera_id"]),
+        UniqueConstraint("area_id", "kind", "opened_frame_id"),
+        CheckConstraint("closed_frame_id <> opened_frame_id", name="closed_on_another_frame"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    area_id: Mapped[int]
+    camera_id: Mapped[int]
+    kind: Mapped[TaskKind] = mapped_column(Enum(*get_args(TaskKind), name="task_kind"))
+    opened_frame_id: Mapped[int]
+    closed_frame_id: Mapped[int | None]
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    area: Mapped[Area] = relationship()
+    opened_frame: Mapped[Frame] = relationship(foreign_keys="Task.opened_frame_id", overlaps="area")
+    closed_frame: Mapped[Frame | None] = relationship(
+        foreign_keys="Task.closed_frame_id", overlaps="area,opened_frame"
+    )

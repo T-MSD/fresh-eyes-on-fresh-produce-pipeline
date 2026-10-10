@@ -7,7 +7,7 @@ from alembic import command
 from sqlalchemy import Connection, Engine, delete, func, insert, select
 from sqlalchemy.exc import IntegrityError
 
-from config.db.schema import Area, Camera, Dataset, Frame, Prediction, Product, Run
+from config.db.schema import Area, Camera, Dataset, Frame, Prediction, Product, Run, Task
 from tests.conftest import alembic_config
 
 CORNERS = {
@@ -89,6 +89,19 @@ def add_prediction(
         **overrides,
     }
     db.execute(insert(Prediction).values(**values))
+
+
+def add_task(
+    db: Connection, area_id: int, opened_frame_id: int, camera_id: int, **overrides: Any
+) -> int:
+    values = {
+        "area_id": area_id,
+        "camera_id": camera_id,
+        "kind": "restock",
+        "opened_frame_id": opened_frame_id,
+        **overrides,
+    }
+    return db.execute(insert(Task).values(**values).returning(Task.id)).scalar_one()
 
 
 def assert_rejected(
@@ -348,3 +361,86 @@ def test_run_score_cannot_exceed_two_points_per_labelled_area(db: Connection, da
 
 def test_run_labelled_areas_cannot_be_negative(db: Connection, dataset: int):
     assert_rejected(db, "ck_runs_labelled_areas_non_negative", add_run, dataset, labelled_areas=-1)
+
+
+def test_task_accepts_area_and_frames_of_its_camera(db: Connection, camera: int):
+    area_id, opened, closed = (
+        add_area(db, camera, 1),
+        add_frame(db, camera),
+        add_frame(db, camera, 1751055841),
+    )
+    add_task(db, area_id, opened, camera, closed_frame_id=closed)
+
+
+@pytest.mark.parametrize(
+    ("unknown", "constraint"),
+    [
+        ({"area_id": -1}, "fk_tasks_area_id_areas"),
+        ({"opened_frame_id": -1}, "fk_tasks_opened_frame_id_frames"),
+        ({"closed_frame_id": -1}, "fk_tasks_closed_frame_id_frames"),
+    ],
+    ids=["area", "opened_frame", "closed_frame"],
+)
+def test_task_rejects_unknown_area_or_frame(db: Connection, camera: int, unknown, constraint):
+    ids = {"area_id": add_area(db, camera, 1), "opened_frame_id": add_frame(db, camera)}
+    assert_rejected(db, constraint, add_task, camera_id=camera, **{**ids, **unknown})
+
+
+def test_task_rejects_area_from_another_camera(db: Connection, dataset: int, camera: int):
+    area_id = add_area(db, add_camera(db, dataset, "6383"), 1)
+    assert_rejected(db, "fk_tasks_area_id_areas", add_task, area_id, add_frame(db, camera), camera)
+
+
+@pytest.mark.parametrize(
+    ("frame", "constraint"),
+    [
+        ("opened_frame_id", "fk_tasks_opened_frame_id_frames"),
+        ("closed_frame_id", "fk_tasks_closed_frame_id_frames"),
+    ],
+    ids=["opened_frame", "closed_frame"],
+)
+def test_task_rejects_frame_from_another_camera(
+    db: Connection, dataset: int, camera: int, frame, constraint
+):
+    other_frame = add_frame(db, add_camera(db, dataset, "6383"))
+    area_id, own_frame = add_area(db, camera, 1), add_frame(db, camera)
+    frames = {"opened_frame_id": own_frame, frame: other_frame}
+    assert_rejected(db, constraint, add_task, area_id, camera_id=camera, **frames)
+
+
+def test_task_rejects_camera_that_owns_neither_area_nor_frame(
+    db: Connection, dataset: int, camera: int
+):
+    other = add_camera(db, dataset, "6383")
+    area_id, frame_id = add_area(db, camera, 1), add_frame(db, camera)
+    both = {"fk_tasks_area_id_areas", "fk_tasks_opened_frame_id_frames"}
+    assert_rejected(db, both, add_task, area_id, frame_id, other)
+
+
+def test_task_is_unique_per_area_kind_and_opened_frame(db: Connection, camera: int):
+    area_id, frame_id = add_area(db, camera, 1), add_frame(db, camera)
+    add_task(db, area_id, frame_id, camera)
+    add_task(db, area_id, frame_id, camera, kind="move_product")
+    add_task(db, area_id, add_frame(db, camera, 1751055841), camera)
+    assert_rejected(
+        db, "uq_tasks_area_id_kind_opened_frame_id", add_task, area_id, frame_id, camera
+    )
+
+
+def test_task_cannot_close_on_the_frame_that_opened_it(db: Connection, camera: int):
+    area_id, frame_id = add_area(db, camera, 1), add_frame(db, camera)
+    assert_rejected(
+        db,
+        "ck_tasks_closed_on_another_frame",
+        add_task,
+        area_id,
+        frame_id,
+        camera,
+        closed_frame_id=frame_id,
+    )
+
+
+def test_task_starts_open_and_not_done(db: Connection, camera: int):
+    task_id = add_task(db, add_area(db, camera, 1), add_frame(db, camera), camera)
+    stored = db.execute(select(Task.closed_frame_id, Task.done_at).where(Task.id == task_id)).one()
+    assert tuple(stored) == (None, None)
