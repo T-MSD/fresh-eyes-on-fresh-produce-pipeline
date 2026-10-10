@@ -179,6 +179,21 @@ def test_prediction_confidence_is_within_zero_and_one(db: Connection, camera: st
     )
 
 
+@pytest.mark.parametrize(
+    "missing",
+    [
+        {"compliance_confidence"},
+        {"stock_confidence"},
+        {"compliance_confidence", "stock_confidence"},
+    ],
+)
+def test_prediction_without_confidence_estimate_is_stored(db: Connection, camera: str, missing):
+    run_id, frame_id, area_id = add_run(db), add_frame(db, camera), add_area(db, camera, 1)
+    add_prediction(db, run_id, frame_id, area_id, camera, **dict.fromkeys(missing))
+    stored = db.execute(select(Prediction.compliance_confidence, Prediction.stock_confidence)).one()
+    assert {field for field, value in stored._asdict().items() if value is None} == missing
+
+
 def test_deleting_run_deletes_its_predictions(db: Connection, camera: str):
     run_id = add_run(db)
     add_prediction(db, run_id, add_frame(db, camera), add_area(db, camera, 1), camera)

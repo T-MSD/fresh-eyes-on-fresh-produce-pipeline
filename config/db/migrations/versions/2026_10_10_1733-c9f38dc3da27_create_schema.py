@@ -131,8 +131,8 @@ def upgrade() -> None:
             "stock_level", sa.Enum("empty", "half", "full", name="stock_level"), nullable=False
         ),
         sa.Column("detected_product_id", sa.String(), nullable=True),
-        sa.Column("compliance_confidence", sa.Double(), nullable=False),
-        sa.Column("stock_confidence", sa.Double(), nullable=False),
+        sa.Column("compliance_confidence", sa.Double(), nullable=True),
+        sa.Column("stock_confidence", sa.Double(), nullable=True),
         sa.Column("is_fallback", sa.Boolean(), server_default=sa.text("false"), nullable=False),
         sa.CheckConstraint(
             "compliance_confidence BETWEEN 0 AND 1",

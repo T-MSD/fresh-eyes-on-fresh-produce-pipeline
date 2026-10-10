@@ -65,7 +65,7 @@ Submission and dev labels share this shape: camera → frame filename → `area_
   "planogram_compliant": true, "stock_level": "half", "stock_value": 0.5 } } } }
 ```
 
-The rich predictions file for the frontend adds `ts`, `product_id`, `product_name`, `detected_product_id`, `compliance_confidence` and `stock_confidence` per area. Changing either shape is a breaking change for the frontend: update both repos together.
+The rich predictions file for the frontend adds `ts`, `product_id`, `product_name`, `detected_product_id`, `compliance_confidence` and `stock_confidence` per area. A confidence is `null` when the method gives no estimate (fallbacks included); never invent one. The frontend shows `null` as unsure. Changing either shape is a breaking change for the frontend: update both repos together.
 
 ## Dataset
 

@@ -146,8 +146,8 @@ class Prediction(Base):
     planogram_compliant: Mapped[bool]
     stock_level: Mapped[StockLevel] = mapped_column(Enum(*get_args(StockLevel), name="stock_level"))
     detected_product_id: Mapped[str | None] = mapped_column(ForeignKey("products.id"))
-    compliance_confidence: Mapped[float]
-    stock_confidence: Mapped[float]
+    compliance_confidence: Mapped[float | None]
+    stock_confidence: Mapped[float | None]
     is_fallback: Mapped[bool] = mapped_column(server_default=text("false"))
 
     run: Mapped[Run] = relationship(back_populates="predictions")
