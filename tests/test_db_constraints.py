@@ -7,7 +7,7 @@ from alembic import command
 from sqlalchemy import Connection, Engine, delete, func, insert, select
 from sqlalchemy.exc import IntegrityError
 
-from config.db.schema import Area, Camera, Dataset, Frame, Prediction, Product, Run
+from config.db.schema import Area, Camera, Dataset, Frame, Prediction, Product, Run, Task
 from tests.conftest import alembic_config
 
 CORNERS = {
@@ -89,6 +89,27 @@ def add_prediction(
         **overrides,
     }
     db.execute(insert(Prediction).values(**values))
+
+
+def add_predicted_frame(
+    db: Connection, run_id: int, area_id: int, camera_id: int, ts: int = 1751052241
+) -> int:
+    frame_id = add_frame(db, camera_id, ts)
+    add_prediction(db, run_id, frame_id, area_id, camera_id)
+    return frame_id
+
+
+def add_task(
+    db: Connection, run_id: int, area_id: int, opened_frame_id: int, **overrides: Any
+) -> int:
+    values = {
+        "run_id": run_id,
+        "area_id": area_id,
+        "kind": "restock",
+        "opened_frame_id": opened_frame_id,
+        **overrides,
+    }
+    return db.execute(insert(Task).values(**values).returning(Task.id)).scalar_one()
 
 
 def assert_rejected(
@@ -348,3 +369,101 @@ def test_run_score_cannot_exceed_two_points_per_labelled_area(db: Connection, da
 
 def test_run_labelled_areas_cannot_be_negative(db: Connection, dataset: int):
     assert_rejected(db, "ck_runs_labelled_areas_non_negative", add_run, dataset, labelled_areas=-1)
+
+
+def test_task_opens_and_closes_on_frames_its_run_predicted_for_its_area(
+    db: Connection, dataset: int, camera: int
+):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    opened = add_predicted_frame(db, run_id, area_id, camera)
+    closed = add_predicted_frame(db, run_id, area_id, camera, 1751055841)
+    add_task(db, run_id, area_id, opened, closed_frame_id=closed)
+
+
+@pytest.mark.parametrize("frame", ["opened_frame_id", "closed_frame_id"])
+def test_task_rejects_frame_its_run_did_not_predict_for_its_area(
+    db: Connection, dataset: int, camera: int, frame
+):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    predicted = add_predicted_frame(db, run_id, area_id, camera)
+    unpredicted = add_frame(db, camera, 1751055841)
+    by_another_run = add_predicted_frame(db, add_run(db, dataset), area_id, camera, 1751059441)
+    for_another_area = add_predicted_frame(db, run_id, add_area(db, camera, 2), camera, 1751063041)
+    for other in (unpredicted, by_another_run, for_another_area):
+        frames = {"opened_frame_id": predicted, frame: other}
+        assert_rejected(db, f"fk_tasks_{frame}_predictions", add_task, run_id, area_id, **frames)
+
+
+def test_task_is_unique_per_run_area_kind_and_opened_frame(
+    db: Connection, dataset: int, camera: int
+):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    opened = add_predicted_frame(db, run_id, area_id, camera)
+    closed = add_predicted_frame(db, run_id, area_id, camera, 1751055841)
+    add_task(db, run_id, area_id, opened, closed_frame_id=closed)
+    add_task(db, run_id, area_id, opened, kind="move_product", closed_frame_id=closed)
+    assert_rejected(
+        db,
+        "uq_tasks_run_id_area_id_kind_opened_frame_id",
+        add_task,
+        run_id,
+        area_id,
+        opened,
+        closed_frame_id=closed,
+    )
+
+
+def test_area_has_at_most_one_open_task_per_run(db: Connection, dataset: int, camera: int):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    first, second, third = (
+        add_predicted_frame(db, run_id, area_id, camera, ts)
+        for ts in (1751052241, 1751055841, 1751059441)
+    )
+    add_task(db, run_id, area_id, first, kind="top_up", closed_frame_id=second)
+    add_task(db, run_id, area_id, second)
+    assert_rejected(
+        db, "uq_tasks_run_id_area_id_open", add_task, run_id, area_id, third, kind="move_product"
+    )
+
+
+def test_open_tasks_of_other_areas_or_runs_do_not_conflict(
+    db: Connection, dataset: int, camera: int
+):
+    run_id, area_id, frame_id = add_run(db, dataset), add_area(db, camera, 1), add_frame(db, camera)
+    for run, area in [
+        (run_id, area_id),
+        (run_id, add_area(db, camera, 2)),
+        (add_run(db, dataset), area_id),
+    ]:
+        add_prediction(db, run, frame_id, area, camera)
+        add_task(db, run, area, frame_id)
+
+
+def test_task_cannot_close_on_the_frame_that_opened_it(db: Connection, dataset: int, camera: int):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    frame_id = add_predicted_frame(db, run_id, area_id, camera)
+    assert_rejected(
+        db,
+        "ck_tasks_closed_on_another_frame",
+        add_task,
+        run_id,
+        area_id,
+        frame_id,
+        closed_frame_id=frame_id,
+    )
+
+
+def test_task_starts_open_and_not_done(db: Connection, dataset: int, camera: int):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    task_id = add_task(db, run_id, area_id, add_predicted_frame(db, run_id, area_id, camera))
+    stored = db.execute(select(Task.closed_frame_id, Task.done_at).where(Task.id == task_id)).one()
+    assert tuple(stored) == (None, None)
+
+
+def test_deleting_run_deletes_its_tasks(db: Connection, dataset: int, camera: int):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    add_task(db, run_id, area_id, add_predicted_frame(db, run_id, area_id, camera))
+
+    db.execute(delete(Run).where(Run.id == run_id))
+
+    assert db.scalar(select(func.count()).select_from(Task)) == 0

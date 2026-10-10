@@ -53,6 +53,8 @@ datasets ──< cameras ──< areas >── products >── datasets
    │            └──< frames│          │
    │                   │   │          │
    └──< runs ──< predictions ─────────┘     PK (run_id, frame_id, area_id)
+                     │
+                     └──< tasks             opened and closed frame (NULL while open)
 ```
 
 Every load of a dataset adds a row to `datasets` (planogram path, images folder, load time) with
@@ -66,6 +68,13 @@ everything outside it uses `external_id`.
 
 Composite foreign keys keep each row inside one dataset: an area's camera and product, and a
 prediction's run, camera and detected product, all belong to the same dataset.
+
+A task is one problem on one area in one run: `restock` (empty), `move_product` (wrong product)
+or `top_up` (half). It opens on the frame where the problem appears and closes on the first later
+frame where it is gone; its kind never changes. `done_at` is the time staff marked it done. Both
+frames reference the run's prediction for the area, so deleting a run deletes its tasks.
+`(run_id, area_id, kind, opened_frame_id)` is unique, and an area has at most one open task per
+run.
 
 ## Loading a dataset
 

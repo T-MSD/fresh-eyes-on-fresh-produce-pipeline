@@ -19,6 +19,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 StockLevel = Literal["empty", "half", "full"]
 RunStatus = Literal["running", "done", "failed"]
+TaskKind = Literal["restock", "move_product", "top_up"]
 
 STOCK_VALUES: dict[StockLevel, float] = {"empty": 0.0, "half": 0.5, "full": 1.0}
 CORNERS = ("top_left", "top_right", "bottom_right", "bottom_left")
@@ -193,3 +194,34 @@ class Prediction(Base):
     @property
     def stock_value(self) -> float:
         return STOCK_VALUES[self.stock_level]
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+    __table_args__ = (
+        *(
+            ForeignKeyConstraint(
+                [frame, "run_id", "area_id"],
+                ["predictions.frame_id", "predictions.run_id", "predictions.area_id"],
+                ondelete="CASCADE",
+            )
+            for frame in ("opened_frame_id", "closed_frame_id")
+        ),
+        UniqueConstraint("run_id", "area_id", "kind", "opened_frame_id"),
+        Index(
+            "uq_tasks_run_id_area_id_open",
+            "run_id",
+            "area_id",
+            unique=True,
+            postgresql_where=text("closed_frame_id IS NULL"),
+        ),
+        CheckConstraint("closed_frame_id <> opened_frame_id", name="closed_on_another_frame"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int]
+    area_id: Mapped[int]
+    kind: Mapped[TaskKind] = mapped_column(Enum(*get_args(TaskKind), name="task_kind"))
+    opened_frame_id: Mapped[int]
+    closed_frame_id: Mapped[int | None]
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
