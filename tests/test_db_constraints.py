@@ -91,12 +91,20 @@ def add_prediction(
     db.execute(insert(Prediction).values(**values))
 
 
+def add_predicted_frame(
+    db: Connection, run_id: int, area_id: int, camera_id: int, ts: int = 1751052241
+) -> int:
+    frame_id = add_frame(db, camera_id, ts)
+    add_prediction(db, run_id, frame_id, area_id, camera_id)
+    return frame_id
+
+
 def add_task(
-    db: Connection, area_id: int, opened_frame_id: int, camera_id: int, **overrides: Any
+    db: Connection, run_id: int, area_id: int, opened_frame_id: int, **overrides: Any
 ) -> int:
     values = {
+        "run_id": run_id,
         "area_id": area_id,
-        "camera_id": camera_id,
         "kind": "restock",
         "opened_frame_id": opened_frame_id,
         **overrides,
@@ -363,84 +371,99 @@ def test_run_labelled_areas_cannot_be_negative(db: Connection, dataset: int):
     assert_rejected(db, "ck_runs_labelled_areas_non_negative", add_run, dataset, labelled_areas=-1)
 
 
-def test_task_accepts_area_and_frames_of_its_camera(db: Connection, camera: int):
-    area_id, opened, closed = (
-        add_area(db, camera, 1),
-        add_frame(db, camera),
-        add_frame(db, camera, 1751055841),
-    )
-    add_task(db, area_id, opened, camera, closed_frame_id=closed)
-
-
-@pytest.mark.parametrize(
-    ("unknown", "constraint"),
-    [
-        ({"area_id": -1}, "fk_tasks_area_id_areas"),
-        ({"opened_frame_id": -1}, "fk_tasks_opened_frame_id_frames"),
-        ({"closed_frame_id": -1}, "fk_tasks_closed_frame_id_frames"),
-    ],
-    ids=["area", "opened_frame", "closed_frame"],
-)
-def test_task_rejects_unknown_area_or_frame(db: Connection, camera: int, unknown, constraint):
-    ids = {"area_id": add_area(db, camera, 1), "opened_frame_id": add_frame(db, camera)}
-    assert_rejected(db, constraint, add_task, camera_id=camera, **{**ids, **unknown})
-
-
-def test_task_rejects_area_from_another_camera(db: Connection, dataset: int, camera: int):
-    area_id = add_area(db, add_camera(db, dataset, "6383"), 1)
-    assert_rejected(db, "fk_tasks_area_id_areas", add_task, area_id, add_frame(db, camera), camera)
-
-
-@pytest.mark.parametrize(
-    ("frame", "constraint"),
-    [
-        ("opened_frame_id", "fk_tasks_opened_frame_id_frames"),
-        ("closed_frame_id", "fk_tasks_closed_frame_id_frames"),
-    ],
-    ids=["opened_frame", "closed_frame"],
-)
-def test_task_rejects_frame_from_another_camera(
-    db: Connection, dataset: int, camera: int, frame, constraint
-):
-    other_frame = add_frame(db, add_camera(db, dataset, "6383"))
-    area_id, own_frame = add_area(db, camera, 1), add_frame(db, camera)
-    frames = {"opened_frame_id": own_frame, frame: other_frame}
-    assert_rejected(db, constraint, add_task, area_id, camera_id=camera, **frames)
-
-
-def test_task_rejects_camera_that_owns_neither_area_nor_frame(
+def test_task_opens_and_closes_on_frames_its_run_predicted_for_its_area(
     db: Connection, dataset: int, camera: int
 ):
-    other = add_camera(db, dataset, "6383")
-    area_id, frame_id = add_area(db, camera, 1), add_frame(db, camera)
-    both = {"fk_tasks_area_id_areas", "fk_tasks_opened_frame_id_frames"}
-    assert_rejected(db, both, add_task, area_id, frame_id, other)
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    opened = add_predicted_frame(db, run_id, area_id, camera)
+    closed = add_predicted_frame(db, run_id, area_id, camera, 1751055841)
+    add_task(db, run_id, area_id, opened, closed_frame_id=closed)
 
 
-def test_task_is_unique_per_area_kind_and_opened_frame(db: Connection, camera: int):
-    area_id, frame_id = add_area(db, camera, 1), add_frame(db, camera)
-    add_task(db, area_id, frame_id, camera)
-    add_task(db, area_id, frame_id, camera, kind="move_product")
-    add_task(db, area_id, add_frame(db, camera, 1751055841), camera)
+@pytest.mark.parametrize("frame", ["opened_frame_id", "closed_frame_id"])
+def test_task_rejects_frame_its_run_did_not_predict_for_its_area(
+    db: Connection, dataset: int, camera: int, frame
+):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    predicted = add_predicted_frame(db, run_id, area_id, camera)
+    unpredicted = add_frame(db, camera, 1751055841)
+    by_another_run = add_predicted_frame(db, add_run(db, dataset), area_id, camera, 1751059441)
+    for_another_area = add_predicted_frame(db, run_id, add_area(db, camera, 2), camera, 1751063041)
+    for other in (unpredicted, by_another_run, for_another_area):
+        frames = {"opened_frame_id": predicted, frame: other}
+        assert_rejected(db, f"fk_tasks_{frame}_predictions", add_task, run_id, area_id, **frames)
+
+
+def test_task_is_unique_per_run_area_kind_and_opened_frame(
+    db: Connection, dataset: int, camera: int
+):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    opened = add_predicted_frame(db, run_id, area_id, camera)
+    closed = add_predicted_frame(db, run_id, area_id, camera, 1751055841)
+    add_task(db, run_id, area_id, opened, closed_frame_id=closed)
+    add_task(db, run_id, area_id, opened, kind="move_product", closed_frame_id=closed)
     assert_rejected(
-        db, "uq_tasks_area_id_kind_opened_frame_id", add_task, area_id, frame_id, camera
+        db,
+        "uq_tasks_run_id_area_id_kind_opened_frame_id",
+        add_task,
+        run_id,
+        area_id,
+        opened,
+        closed_frame_id=closed,
     )
 
 
-def test_task_cannot_close_on_the_frame_that_opened_it(db: Connection, camera: int):
-    area_id, frame_id = add_area(db, camera, 1), add_frame(db, camera)
+def test_area_has_at_most_one_open_task_per_run(db: Connection, dataset: int, camera: int):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    first, second, third = (
+        add_predicted_frame(db, run_id, area_id, camera, ts)
+        for ts in (1751052241, 1751055841, 1751059441)
+    )
+    add_task(db, run_id, area_id, first, kind="top_up", closed_frame_id=second)
+    add_task(db, run_id, area_id, second)
+    assert_rejected(
+        db, "uq_tasks_run_id_area_id_open", add_task, run_id, area_id, third, kind="move_product"
+    )
+
+
+def test_open_tasks_of_other_areas_or_runs_do_not_conflict(
+    db: Connection, dataset: int, camera: int
+):
+    run_id, area_id, frame_id = add_run(db, dataset), add_area(db, camera, 1), add_frame(db, camera)
+    for run, area in [
+        (run_id, area_id),
+        (run_id, add_area(db, camera, 2)),
+        (add_run(db, dataset), area_id),
+    ]:
+        add_prediction(db, run, frame_id, area, camera)
+        add_task(db, run, area, frame_id)
+
+
+def test_task_cannot_close_on_the_frame_that_opened_it(db: Connection, dataset: int, camera: int):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    frame_id = add_predicted_frame(db, run_id, area_id, camera)
     assert_rejected(
         db,
         "ck_tasks_closed_on_another_frame",
         add_task,
+        run_id,
         area_id,
         frame_id,
-        camera,
         closed_frame_id=frame_id,
     )
 
 
-def test_task_starts_open_and_not_done(db: Connection, camera: int):
-    task_id = add_task(db, add_area(db, camera, 1), add_frame(db, camera), camera)
+def test_task_starts_open_and_not_done(db: Connection, dataset: int, camera: int):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    task_id = add_task(db, run_id, area_id, add_predicted_frame(db, run_id, area_id, camera))
     stored = db.execute(select(Task.closed_frame_id, Task.done_at).where(Task.id == task_id)).one()
     assert tuple(stored) == (None, None)
+
+
+def test_deleting_run_deletes_its_tasks(db: Connection, dataset: int, camera: int):
+    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    add_task(db, run_id, area_id, add_predicted_frame(db, run_id, area_id, camera))
+
+    db.execute(delete(Run).where(Run.id == run_id))
+
+    assert db.scalar(select(func.count()).select_from(Task)) == 0

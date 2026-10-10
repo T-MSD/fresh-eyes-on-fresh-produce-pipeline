@@ -199,23 +199,29 @@ class Prediction(Base):
 class Task(Base):
     __tablename__ = "tasks"
     __table_args__ = (
-        ForeignKeyConstraint(["area_id", "camera_id"], ["areas.id", "areas.camera_id"]),
-        ForeignKeyConstraint(["opened_frame_id", "camera_id"], ["frames.id", "frames.camera_id"]),
-        ForeignKeyConstraint(["closed_frame_id", "camera_id"], ["frames.id", "frames.camera_id"]),
-        UniqueConstraint("area_id", "kind", "opened_frame_id"),
+        *(
+            ForeignKeyConstraint(
+                [frame, "run_id", "area_id"],
+                ["predictions.frame_id", "predictions.run_id", "predictions.area_id"],
+                ondelete="CASCADE",
+            )
+            for frame in ("opened_frame_id", "closed_frame_id")
+        ),
+        UniqueConstraint("run_id", "area_id", "kind", "opened_frame_id"),
+        Index(
+            "uq_tasks_run_id_area_id_open",
+            "run_id",
+            "area_id",
+            unique=True,
+            postgresql_where=text("closed_frame_id IS NULL"),
+        ),
         CheckConstraint("closed_frame_id <> opened_frame_id", name="closed_on_another_frame"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int]
     area_id: Mapped[int]
-    camera_id: Mapped[int]
     kind: Mapped[TaskKind] = mapped_column(Enum(*get_args(TaskKind), name="task_kind"))
     opened_frame_id: Mapped[int]
     closed_frame_id: Mapped[int | None]
     done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-    area: Mapped[Area] = relationship()
-    opened_frame: Mapped[Frame] = relationship(foreign_keys="Task.opened_frame_id", overlaps="area")
-    closed_frame: Mapped[Frame | None] = relationship(
-        foreign_keys="Task.closed_frame_id", overlaps="area,opened_frame"
-    )
