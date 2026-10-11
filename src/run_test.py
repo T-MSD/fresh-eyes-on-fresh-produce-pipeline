@@ -8,40 +8,37 @@
   6. one extra rule: for percentage-method products, a blend "empty/half" becomes "full" if the fill
      model (ridge on CLIP, from the bundle) says >= 65%. Judged on 22+1 crops: 19 right, 4 wrong.
      Skipped for products missing from out/product_groups.json.
-planogram_compliant is the zero-shot CLIP flag. Areas on frames that could not be read get a fallback
-(compliant, the stock level with the best expected points under the hand-label mix). Nothing under
-out/ except out/test/ is written.
+planogram_compliant is the zero-shot CLIP flag. A product no class rule knows is scored by the
+classifier alone and counted compliant. Nothing under out/ except out/test/ is written.
 
 Reads only out/finetune/model.pt, out/finetune/bundle.joblib (both from finetune --final) and
 out/product_groups.json. --selftest also reads the training crops it rebuilds the submission from.
 
-    uv run --env-file .env python -m src.run_test --data-dir <folder with planogram.json + camera folders>
-    uv run --env-file .env python -m src.run_test --selftest      # rebuild the CURRENT submission from its own crops and compare
+    uv run --extra ml --env-file .env python -m src.run_test --data-dir <dataset-folder>
+    uv run --extra ml --env-file .env python -m src.run_test --selftest
 """
 
 import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Annotated
 
 import joblib
 import numpy as np
-import timm
-import torch
 import typer
-from PIL import Image
 
 from config.db.connection import make_engine
 from config.db.save_run import UnusableRun, latest_dataset_id, save_run
 from src.clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class, softmax
-from src.finetune import BUNDLE, Net, predict
-from src.train_classifier import proba_of
+from src.prediction_io import SUBMISSION, NetworkCrop, merge_fallbacks
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 TEST = OUT / "test"
 BACKBONE, SIZE = "resnet50.a1_in1k", 224
 W_NET, FILL_FULL_PCT = 0.75, 65.0
+BUNDLE = OUT / "finetune" / "bundle.joblib"
 UNKNOWN_CLASS = "fresh produce"
 
 app = typer.Typer(add_completion=False)
@@ -60,21 +57,11 @@ def standardise_with(a: np.ndarray, bundle: dict) -> np.ndarray:
     return (a - bundle["emb_mean"]) / (bundle["emb_std"] + 1e-6)
 
 
-def fallback_result(items: list[dict], level: str) -> dict:
-    """An answer for every area of a frame that could not be read: compliant, one stock level."""
-    result: dict = {}
-    for it in items:
-        result.setdefault(it["camera"], {}).setdefault(it["image"], {})[it["area_id"]] = {
-            "planogram_compliant": True,
-            "stock_level": level,
-            "stock_value": STOCK_VALUES[level],
-        }
-    return result
-
-
 def clip_zeroshot(items, crops_dir: Path, classes: list[str], topk: int, cached: np.ndarray | None):
     """Image embeddings, level probabilities and the compliance flag, as src/clip_predict.py computes them."""
     import open_clip
+    import torch
+    from PIL import Image
 
     name, pretrained = "ViT-B-16-quickgelu", "openai"
     device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -136,18 +123,62 @@ def clip_zeroshot(items, crops_dir: Path, classes: list[str], topk: int, cached:
     return img, zs, np.array(ok)
 
 
+def blend_network(
+    items: list[NetworkCrop], crops_dir: Path, train_classes: list[str], p_lr: np.ndarray
+) -> np.ndarray:
+    known = [n for n, item in enumerate(items) if class_of(item.product_name) in train_classes]
+    if not known:
+        return p_lr.copy()
+
+    import torch
+    from PIL import Image
+
+    from src.finetune import Net, predict
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    model = Net(BACKBONE, len(train_classes), pretrained=False)
+    model.load_state_dict(
+        torch.load(OUT / "finetune" / "model.pt", map_location="cpu", weights_only=True)
+    )
+    model.to(device)
+    imgs = torch.from_numpy(
+        np.stack(
+            [
+                np.asarray(
+                    Image.open(crops_dir / items[n].crop).convert("RGB").resize((SIZE, SIZE))
+                )
+                for n in known
+            ]
+        ).transpose(0, 3, 1, 2)
+    )
+    cls = torch.tensor([train_classes.index(class_of(items[n].product_name)) for n in known])
+    p_known, _ = predict(model, imgs, cls, device)
+    probabilities = p_lr.copy()
+    probabilities[known] = W_NET * p_known + (1 - W_NET) * p_lr[known]
+    return probabilities
+
+
 def write_predictions(result: dict, out_file: Path) -> None:
     out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(json.dumps(result, indent=1))
 
 
+def fallback_keys_of(crops_dir: Path) -> set[tuple[str, str, str]]:
+    path = crops_dir / "fallbacks.json"
+    if not path.exists():
+        return set()
+    return {
+        (camera, image, area)
+        for camera, frames in SUBMISSION.validate_json(path.read_bytes()).items()
+        for image, areas in frames.items()
+        for area in areas
+    }
+
+
 def store_run(
-    result: dict,
-    fallback_keys: set[tuple[str, str, str]],
-    dataset_id: int | None,
-    data_dir: Path | None,
-    topk: int,
+    result: dict, crops_dir: Path, dataset_id: int | None, data_dir: Path | None, topk: int
 ) -> None:
+    fallback = fallback_keys_of(crops_dir)
     engine = make_engine()
     try:
         with engine.begin() as conn:
@@ -158,7 +189,7 @@ def store_run(
                 result,
                 method="run_test",
                 params={"data_dir": str(data_dir), "topk": topk, "w_net": W_NET},
-                fallback=fallback_keys,
+                fallback=fallback,
             )
     except UnusableRun as error:
         for problem in error.problems:
@@ -167,7 +198,7 @@ def store_run(
         raise typer.Exit(1) from error
     finally:
         engine.dispose()
-    typer.echo(f"stored run {run_id} on dataset {target} ({len(fallback_keys)} fallback areas)")
+    typer.echo(f"stored run {run_id} on dataset {target} ({len(fallback)} fallback areas)")
 
 
 @app.command()
@@ -179,25 +210,23 @@ def main(
         False, help="Rebuild the current submission from its own crops and compare"
     ),
     out_file: Path = TEST / "predictions.json",
+    crops_dir: Path = TEST / "crops",
     topk: int = 5,
-    db: bool = typer.Option(
-        False, help="Also store the run and its predictions in the database (DATABASE_URL)"
-    ),
-    dataset_id: int | None = typer.Option(
-        None, help="Dataset load the run belongs to; default is the newest (see cli.py load)"
-    ),
+    db: Annotated[
+        bool, typer.Option(help="Also store the run and its predictions in the database")
+    ] = False,
+    dataset_id: Annotated[
+        int | None,
+        typer.Option(help="Dataset load the run belongs to; default is the newest (cli.py load)"),
+    ] = None,
 ) -> None:
     if not selftest and data_dir is None:
         raise typer.BadParameter("give --data-dir, or --selftest")
     if db and selftest:
         raise typer.BadParameter("--db stores a run on new data; the self-test is not one")
-    bundle = joblib.load(BUNDLE)
-    train_classes = bundle["train_classes"]
-    unreadable: list[dict] = []
     if selftest:
         items, crops_dir = json.loads((OUT / "crops" / "index.json").read_text()), OUT / "crops"
     else:
-        crops_dir = TEST / "crops"
         subprocess.run(
             [
                 sys.executable,
@@ -212,32 +241,34 @@ def main(
             cwd=ROOT,
         )
         items = json.loads((crops_dir / "index.json").read_text())
-        unreadable_file = crops_dir / "unreadable.json"
-        if unreadable_file.exists():
-            unreadable = json.loads(unreadable_file.read_text())
-    typer.echo(f"{len(items)} areas to predict, {len(unreadable)} on unreadable frames (fallback)")
-
-    fallback_keys = {(i["camera"], i["image"], i["area_id"]) for i in unreadable}
+    typer.echo(f"{len(items)} areas to predict")
     if not items:
-        result = fallback_result(unreadable, bundle["fallback_level"])
+        result: dict = {}
+        merge_fallbacks(result, crops_dir)
         write_predictions(result, out_file)
+        typer.echo(f"wrote fallbacks to {out_file}")
         if db:
-            store_run(result, fallback_keys, dataset_id, data_dir, topk)
+            store_run(result, crops_dir, dataset_id, data_dir, topk)
         return
 
+    from src.train_classifier import proba_of
+
+    bundle = joblib.load(BUNDLE)
+
+    train_classes = bundle["train_classes"]
     new_classes = sorted({class_of(i["product_name"]) for i in items})
     classes = sorted(set(train_classes) | set(new_classes))
     unseen = sorted(set(new_classes) - set(train_classes))
+    if unseen:
+        typer.echo(
+            f"WARNING: product classes not seen in training: {unseen}. The network cannot score them; the classifier alone is used there."
+        )
     no_rule = sorted(
         {i["product_name"] for i in items if class_of(i["product_name"]) == UNKNOWN_CLASS}
     )
     if no_rule:
         typer.echo(
             f"WARNING: no class rule for {no_rule}. They are scored as '{UNKNOWN_CLASS}' by the classifier alone and counted compliant."
-        )
-    if unseen:
-        typer.echo(
-            f"WARNING: product classes not seen in training: {unseen}. The network cannot score them; the classifier alone is used there."
         )
 
     # CLIP (cached embeddings only in the self-test, where the crops are the training crops).
@@ -247,31 +278,9 @@ def main(
     x_new = standardise_with(emb, bundle)
     p_lr = proba_of(bundle["classifier"], x_new, len(LEVELS))
 
-    known = [n for n, i in enumerate(items) if class_of(i["product_name"]) in train_classes]
-    p = p_lr.copy()
-    if known:
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-        orig = timm.create_model
-        timm.create_model = lambda *a, **k: orig(
-            *a, **{**k, "pretrained": False}
-        )  # weights come from model.pt, no download
-        model = Net(BACKBONE, len(train_classes))
-        timm.create_model = orig
-        model.load_state_dict(torch.load(OUT / "finetune" / "model.pt", map_location="cpu"))
-        model.to(device)
-        imgs = torch.from_numpy(
-            np.stack(
-                [
-                    np.asarray(
-                        Image.open(crops_dir / items[n]["crop"]).convert("RGB").resize((SIZE, SIZE))
-                    )
-                    for n in known
-                ]
-            ).transpose(0, 3, 1, 2)
-        )
-        cls = torch.tensor([train_classes.index(class_of(items[n]["product_name"])) for n in known])
-        p_known, _ = predict(model, imgs, cls, device)
-        p[known] = W_NET * p_known + (1 - W_NET) * p_lr[known]
+    p = blend_network(
+        [NetworkCrop.model_validate(item) for item in items], crops_dir, train_classes, p_lr
+    )
     level = (p @ POINTS.T).argmax(1)
 
     # The one extra rule, for percentage-method products.
@@ -285,7 +294,7 @@ def main(
             raised += 1
     typer.echo(f"fill rule raised {raised} areas to full")
 
-    result: dict = {}
+    result = {}
     for n, it in enumerate(items):
         lv = LEVELS[level[n]]
         result.setdefault(it["camera"], {}).setdefault(it["image"], {})[it["area_id"]] = {
@@ -293,12 +302,10 @@ def main(
             "stock_level": lv,
             "stock_value": STOCK_VALUES[lv],
         }
-    for camera, frames in fallback_result(unreadable, bundle["fallback_level"]).items():
-        for image, areas in frames.items():
-            result.setdefault(camera, {}).setdefault(image, {}).update(areas)
+    merge_fallbacks(result, crops_dir)
     write_predictions(result, out_file)
     if db:
-        store_run(result, fallback_keys, dataset_id, data_dir, topk)
+        store_run(result, crops_dir, dataset_id, data_dir, topk)
     counts = {lv: int((level == k).sum()) for k, lv in enumerate(LEVELS)}
     typer.echo(f"wrote {out_file}: {counts}, non-compliant {int((~compliant).sum())}")
 

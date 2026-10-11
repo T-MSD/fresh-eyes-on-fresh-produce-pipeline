@@ -14,6 +14,8 @@ from pathlib import Path
 
 import typer
 
+from src.prediction_io import merge_fallbacks
+
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 VALUE = {"empty": 0, "half": 0.5, "full": 1}
@@ -40,6 +42,7 @@ def main() -> None:
         if (groups[it["product_id"]]["method"], before, after) in TAKE:
             out[c][i][a]["stock_level"], out[c][i][a]["stock_value"] = after, VALUE[after]
             taken += 1
+    merge_fallbacks(out, OUT / "crops")
     (OUT / "final_predictions.hybrid.json").write_text(json.dumps(out, indent=1))
     typer.echo(f"{taken} areas changed vs current -> out/final_predictions.hybrid.json")
 
