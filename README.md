@@ -13,6 +13,42 @@ uv sync --extra ml      # adds torch, transformers, open_clip, google-cloud-visi
 
 Run every script as a module through uv, from the repo root: `uv run --env-file .env python -m src.<script>`.
 
+## Run everything
+
+From a fresh clone to a run in the database and the API serving it. The hand-made inputs
+`out/labels.json`, `out/fill_labels.json` and `out/product_groups.json` are tracked; everything
+else under `out/` is rebuilt by these steps.
+
+```bash
+cp .env.example .env                       # then set the Postgres credentials
+uv sync --extra ml
+
+docker compose up -d db                    # Postgres; wait for "healthy" in `docker compose ps`
+uv run --env-file .env alembic upgrade head
+
+uv run --env-file .env python cli.py load  # dataset/planogram.json + dataset/training from .env
+
+uv run --env-file .env python -m src.crop_areas --data-dir dataset/training     # out/crops/
+uv run --extra ml --env-file .env python -m src.clip_predict                     # CLIP embeddings and probabilities
+uv run --extra ml --env-file .env python -m src.finetune --final                 # out/finetune/model.pt, bundle.joblib
+
+uv run --extra ml --env-file .env python -m src.run_test --data-dir dataset/training --db   # stores the run and its tasks
+
+uv run --env-file .env uvicorn src.main:app --host 127.0.0.1 --port 8000        # API at http://127.0.0.1:8000/docs
+```
+
+`finetune --final` trains the network and is the slow step; `run_test` reuses its output, so
+predicting on new frames only needs `cli.py load` and `run_test --db`. Add `--reload` to the
+`uvicorn` command while editing the API code: it restarts the server whenever a `.py` file
+changes.
+
+Other ways to store a run, and to add tasks to a run stored before runs got them:
+
+```bash
+uv run --env-file .env python cli.py save-run out/final_predictions.json --method hybrid
+uv run --env-file .env python cli.py derive-tasks <run_id>
+```
+
 ## Database
 
 Postgres runs in Docker. Credentials come from `.env` (copy `.env.example`).
