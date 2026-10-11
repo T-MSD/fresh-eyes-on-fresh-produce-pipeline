@@ -1,16 +1,16 @@
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection
-from sqlalchemy.orm import Session
+from sqlalchemy import Connection, text
 
-from src.api.dependencies import get_session
+from config.db.connection import get_connection
 from src.main import app
-from tests.test_db_constraints import (
+from tests.db_builders import (
     add_area,
     add_camera,
+    add_dataset,
     add_frame,
     add_prediction,
     add_product,
@@ -20,119 +20,168 @@ from tests.test_db_constraints import (
 
 @pytest.fixture
 def client(db: Connection) -> Iterator[TestClient]:
-    def session() -> Iterator[Session]:
-        with Session(bind=db) as value:
-            yield value
-
-    app.dependency_overrides[get_session] = session
-    with TestClient(app) as value:
-        yield value
-    app.dependency_overrides.clear()
+    app.dependency_overrides[get_connection] = lambda: db
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides.clear()
 
 
-@pytest.fixture
-def frame(db: Connection) -> int:
-    add_product(db)
-    add_camera(db, "6215")
-    add_area(db, "6215", 2)
-    add_area(db, "6215", 1, top_left=[-12, 350])
-    return add_frame(db, "6215")
+def test_hour_range_without_runs(client: TestClient):
+    response = client.get("/hour-range")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "No completed runs available"}
 
 
-def test_unknown_frame(client: TestClient):
-    assert client.get("/frames/999/areas").status_code == 404
+def test_empty_completed_run_never_uses_older_predictions(db: Connection, client: TestClient):
+    dataset = add_dataset(db)
+    add_product(db, dataset)
+    camera = add_camera(db, dataset, "6215")
+    area = add_area(db, camera, 1)
+    old = add_run(db, dataset, started_at=datetime(2026, 1, 1, tzinfo=UTC), status="done")
+    add_prediction(db, old, add_frame(db, camera), area, camera)
+    latest = add_run(db, dataset, started_at=datetime(2026, 1, 2, tzinfo=UTC), status="done")
 
-
-def test_no_runs(client: TestClient, frame: int):
-    assert client.get(f"/frames/{frame}/areas").status_code == 503
-
-
-@pytest.mark.parametrize("status", ["running", "failed", "done"])
-def test_latest_run_is_global_and_never_fills_from_history(
-    db: Connection, client: TestClient, frame: int, status: str
-):
-    now = datetime.now(UTC)
-    old = add_run(db, started_at=now - timedelta(hours=1), status="done")
-    latest = add_run(db, started_at=now, status=status)
-    add_prediction(db, old, frame, "6215_1", "6215", stock_level="full")
-    add_prediction(db, old, frame, "6215_2", "6215", stock_level="full")
-    add_prediction(
-        db,
-        latest,
-        frame,
-        "6215_2",
-        "6215",
-        stock_level="half",
-        compliance_confidence=None,
-        stock_confidence=None,
-        is_fallback=True,
-    )
-    add_camera(db, "6383")
-    add_area(db, "6383", 1)
-    other_frame = add_frame(db, "6383")
-    add_prediction(db, latest, other_frame, "6383_1", "6383")
-
-    response = client.get(f"/frames/{frame}/areas")
+    response = client.get("/hour-range")
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["run_id"] == latest
-    assert body["frame_id"] == frame
-    assert body["camera_id"] == "6215"
-    assert body["filename"] == "1751052241.jpg"
-    assert [area["area_id"] for area in body["areas"]] == ["6215_1", "6215_2"]
-    assert body["areas"][0]["top_left"] == [-12, 350]
-    assert body["areas"][0]["prediction"] is None
-    area = body["areas"][1]
-    assert area["product_id"] == "11908"
-    assert area["product_name"] == "BANANA CAT I CNT KG"
-    assert area["prediction"] == {
-        "planogram_compliant": True,
-        "stock_level": "half",
-        "stock_value": 0.5,
-        "detected_product_id": None,
-        "compliance_confidence": None,
-        "stock_confidence": None,
-        "is_fallback": True,
-    }
+    assert response.json() == {"run_id": latest, "start": None, "end": None}
 
 
-def test_latest_empty_run_does_not_return_old_predictions(
-    db: Connection, client: TestClient, frame: int
+@pytest.mark.parametrize("status", ["running", "failed"])
+@pytest.mark.parametrize("has_predictions", [False, True])
+def test_incomplete_run_does_not_hide_completed_predictions(
+    db: Connection,
+    client: TestClient,
+    dataset: int,
+    camera: int,
+    status: str,
+    has_predictions: bool,
 ):
-    now = datetime.now(UTC)
-    old = add_run(db, started_at=now)
-    add_prediction(db, old, frame, "6215_1", "6215")
-    latest = add_run(db, started_at=now)
-    body = client.get(f"/frames/{frame}/areas").json()
-    assert body["run_id"] == latest
-    assert all(area["prediction"] is None for area in body["areas"])
+    area = add_area(db, camera, 1)
+    old = add_run(db, dataset, started_at=datetime(2026, 1, 1, tzinfo=UTC), status="done")
+    add_prediction(db, old, add_frame(db, camera), area, camera)
+    latest = add_run(db, dataset, started_at=datetime(2026, 1, 2, tzinfo=UTC), status=status)
+    if has_predictions:
+        add_prediction(db, latest, add_frame(db, camera, 1751059441), area, camera)
+
+    response = client.get("/hour-range")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == old
+    for field in ("start", "end"):
+        assert datetime.fromisoformat(payload[field]) == datetime.fromtimestamp(1751052241, UTC)
 
 
-def test_started_at_takes_priority_over_run_id(db: Connection, client: TestClient, frame: int):
-    now = datetime.now(UTC)
-    latest = add_run(db, started_at=now)
-    add_run(db, started_at=now - timedelta(hours=1))
-    assert client.get(f"/frames/{frame}/areas").json()["run_id"] == latest
+@pytest.mark.parametrize("status", ["running", "failed"])
+@pytest.mark.parametrize("endpoint", ["/hour-range", "/tasks"])
+def test_without_completed_runs_returns_404(
+    db: Connection, client: TestClient, dataset: int, status: str, endpoint: str
+):
+    add_run(db, dataset, status=status)
+
+    response = client.get(endpoint)
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "No completed runs available"}
 
 
-def test_run_is_resolved_again_for_each_request(db: Connection, client: TestClient, frame: int):
-    now = datetime.now(UTC)
-    old = add_run(db, started_at=now)
-    assert client.get(f"/frames/{frame}/areas").json()["run_id"] == old
-    latest = add_run(db, started_at=now + timedelta(seconds=1))
-    assert client.get(f"/frames/{frame}/areas").json()["run_id"] == latest
+def test_hour_range_only_includes_latest_run_frames(db: Connection, client: TestClient):
+    dataset = add_dataset(db)
+    add_product(db, dataset)
+    latest = add_run(db, dataset, started_at=datetime(2026, 1, 2, tzinfo=UTC), status="done")
+    older = add_run(db, dataset, started_at=datetime(2026, 1, 1, tzinfo=UTC), status="done")
+    for camera_id, ts in [("6215", 1751052241), ("6383", 1751059441)]:
+        camera = add_camera(db, dataset, camera_id)
+        area = add_area(db, camera, 1)
+        second_area = add_area(db, camera, 2)
+        frame = add_frame(db, camera, ts)
+        add_prediction(db, latest, frame, area, camera)
+        add_prediction(db, latest, frame, second_area, camera)
+        add_prediction(db, older, add_frame(db, camera, ts - 86400), area, camera)
+        add_frame(db, camera, ts + 86400)
+
+    response = client.get("/hour-range")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == latest
+    assert datetime.fromisoformat(payload["start"]) == datetime.fromtimestamp(1751052241, UTC)
+    assert datetime.fromisoformat(payload["end"]) == datetime.fromtimestamp(1751059441, UTC)
 
 
-def test_frame_without_areas_or_image_size(db: Connection, client: TestClient):
-    add_camera(db, "6215")
-    frame = add_frame(db, "6215", width=None, height=None)
-    latest = add_run(db)
-    body = client.get(f"/frames/{frame}/areas").json()
-    assert body["run_id"] == latest
-    assert body["areas"] == []
+def test_single_frame_and_tied_run_start_times(db: Connection, client: TestClient):
+    dataset = add_dataset(db)
+    add_product(db, dataset)
+    camera = add_camera(db, dataset, "6215")
+    area = add_area(db, camera, 1)
+    started_at = datetime(2026, 1, 1, tzinfo=UTC)
+    older = add_run(db, dataset, started_at=started_at, status="done")
+    latest = add_run(db, dataset, started_at=started_at, status="done")
+    add_prediction(db, older, add_frame(db, camera, 1751052241), area, camera)
+    add_prediction(db, latest, add_frame(db, camera, 1751059441), area, camera)
+
+    response = client.get("/hour-range")
+
+    assert response.status_code == 200
+    timestamp = datetime.fromtimestamp(1751059441, UTC)
+    payload = response.json()
+    assert payload["run_id"] == latest
+    assert datetime.fromisoformat(payload["start"]) == timestamp
+    assert datetime.fromisoformat(payload["end"]) == timestamp
 
 
-@pytest.mark.parametrize("frame_id", ["abc", "0", "-1"])
-def test_invalid_frame_id(client: TestClient, frame_id: str):
-    assert client.get(f"/frames/{frame_id}/areas").status_code == 422
+def test_hour_range_reselects_latest_run_on_each_request(db: Connection, client: TestClient):
+    dataset = add_dataset(db)
+    older = add_run(db, dataset, started_at=datetime(2026, 1, 1, tzinfo=UTC), status="done")
+    assert client.get("/hour-range").json()["run_id"] == older
+    latest = add_run(db, dataset, started_at=datetime(2026, 1, 2, tzinfo=UTC), status="done")
+    assert client.get("/hour-range").json()["run_id"] == latest
+
+
+def test_new_dataset_load_does_not_replace_latest_run(db: Connection, client: TestClient):
+    dataset = add_dataset(db)
+    add_product(db, dataset)
+    camera = add_camera(db, dataset, "6215")
+    area = add_area(db, camera, 1)
+    run = add_run(db, dataset, status="done")
+    add_prediction(db, run, add_frame(db, camera), area, camera)
+    newer_dataset = add_dataset(db)
+    add_product(db, newer_dataset)
+    newer_camera = add_camera(db, newer_dataset, "6215")
+    add_frame(db, newer_camera, 1751059441)
+
+    response = client.get("/hour-range")
+
+    assert response.status_code == 200
+    timestamp = datetime.fromtimestamp(1751052241, UTC)
+    payload = response.json()
+    assert payload["run_id"] == run
+    assert datetime.fromisoformat(payload["start"]) == timestamp
+    assert datetime.fromisoformat(payload["end"]) == timestamp
+
+
+@pytest.mark.parametrize("timezone", ["UTC", "Europe/Lisbon", "America/New_York"])
+def test_hour_range_normalizes_database_session_timezone(
+    db: Connection, client: TestClient, timezone: str
+):
+    db.execute(text("SELECT set_config('TimeZone', :timezone, true)"), {"timezone": timezone})
+    dataset = add_dataset(db)
+    add_product(db, dataset)
+    camera = add_camera(db, dataset, "6215")
+    area = add_area(db, camera, 1)
+    run = add_run(db, dataset, status="done")
+    start, end = 1751052241, 1751059441
+    for ts in (start, end):
+        add_prediction(db, run, add_frame(db, camera, ts), area, camera)
+
+    response = client.get("/hour-range")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["run_id"] == run
+    for field, ts in [("start", start), ("end", end)]:
+        assert datetime.fromisoformat(payload[field]) == datetime.fromtimestamp(ts, UTC)
+        assert payload[field].endswith("Z")

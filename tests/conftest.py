@@ -9,6 +9,7 @@ from sqlalchemy import Connection, Engine, text
 from sqlalchemy.engine import URL, make_url
 
 from config.db.connection import make_engine
+from tests.db_builders import add_camera, add_dataset, add_product
 
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
 
@@ -60,3 +61,14 @@ def db(engine: Engine) -> Iterator[Connection]:
         transaction = conn.begin()
         yield conn
         transaction.rollback()
+
+
+@pytest.fixture
+def dataset(db: Connection) -> int:
+    return add_dataset(db)
+
+
+@pytest.fixture
+def camera(db: Connection, dataset: int) -> int:
+    add_product(db, dataset)
+    return add_camera(db, dataset, "6215")
