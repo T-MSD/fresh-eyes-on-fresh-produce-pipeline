@@ -66,9 +66,6 @@ planogram id (`6215`, `11908`, `6215_2`) in `external_id`, unique within one dat
 planogram can reuse the same ids in a later load. Generated ids stay inside the database;
 everything outside it uses `external_id`.
 
-Every timestamp is a `timestamptz` column of type `UTCDateTime`, so every query reads it back in
-UTC, whatever the session time zone.
-
 Composite foreign keys keep each row inside one dataset: an area's camera and product, and a
 prediction's run, camera and detected product, all belong to the same dataset.
 
@@ -107,10 +104,27 @@ stored without a size, so their areas still get a fallback.
 uv run --env-file .env uvicorn src.main:app --reload
 ```
 
-`GET /tasks` returns the tasks of the most recent run that staff have not marked done. All API
-record queries must use `config.db.queries.latest_run()` to scope records to the run with the
-newest `started_at`, breaking ties by the highest `id`. Run status does not affect selection;
-a newest run without pending tasks never falls back to an older run.
+`GET /hour-range` returns the earliest and latest frame timestamps with predictions in the
+most recent run. All API record queries must use `config.db.queries.latest_run()` to scope
+records to the run with the newest `started_at`, breaking ties by the highest `id`.
+Run status does not affect selection; an empty newest run never falls back to an older run.
+
+```json
+{
+  "run_id": 42,
+  "start": "2025-06-27T08:00:00Z",
+  "end": "2025-06-27T20:00:00Z"
+}
+```
+
+The bounds are full frame timestamps normalized to UTC (`Z`), regardless of the database session
+timezone. For a run without predictions,
+`start` and `end` are `null`. With no runs, the endpoint returns `404` with
+`{"detail": "No runs available"}`. Interactive API documentation is at `/docs`.
+
+`GET /tasks` returns the tasks of the most recent run that staff have not marked done. It uses
+the same `latest_run()` selection as `/hour-range`; a newest run without pending tasks never
+falls back to an older run.
 
 ```json
 {
