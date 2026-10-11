@@ -181,14 +181,16 @@ class Prediction(Base):
         ForeignKeyConstraint(
             ["detected_product_id", "dataset_id"], ["products.id", "products.dataset_id"]
         ),
+        UniqueConstraint("run_id", "frame_id", "area_id"),
         Index("ix_predictions_run_id_area_id", "run_id", "area_id"),
         CheckConstraint("compliance_confidence BETWEEN 0 AND 1", name="compliance_confidence_unit"),
         CheckConstraint("stock_confidence BETWEEN 0 AND 1", name="stock_confidence_unit"),
     )
 
-    run_id: Mapped[int] = mapped_column(primary_key=True)
-    frame_id: Mapped[int] = mapped_column(primary_key=True)
-    area_id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int]
+    frame_id: Mapped[int]
+    area_id: Mapped[int]
     dataset_id: Mapped[int]
     camera_id: Mapped[int]
     planogram_compliant: Mapped[bool]

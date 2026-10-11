@@ -149,6 +149,17 @@ def test_prediction_accepts_frame_and_area_of_same_camera(
     add_prediction(db, add_run(db, dataset), add_frame(db, camera), add_area(db, camera, 1), camera)
 
 
+def test_prediction_gets_generated_id_and_is_unique_per_run_frame_and_area(
+    db: Connection, dataset: int, camera: int
+):
+    ids = (add_run(db, dataset), add_frame(db, camera), add_area(db, camera, 1))
+    other_area = add_area(db, camera, 2)
+    first = add_prediction(db, *ids, camera)
+    second = add_prediction(db, ids[0], ids[1], other_area, camera)
+    assert first != second
+    assert_rejected(db, "uq_predictions_run_id_frame_id_area_id", add_prediction, *ids, camera)
+
+
 def test_prediction_rejects_area_from_another_camera(db: Connection, dataset: int, camera: int):
     other = add_camera(db, dataset, "6383")
     run_id, frame_id, area_id = add_run(db, dataset), add_frame(db, camera), add_area(db, other, 1)

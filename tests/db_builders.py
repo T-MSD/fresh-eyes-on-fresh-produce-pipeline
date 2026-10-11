@@ -64,7 +64,7 @@ def add_run(db: Connection, dataset_id: int, **overrides: Any) -> int:
 
 def add_prediction(
     db: Connection, run_id: int, frame_id: int, area_id: int, camera_id: int, **overrides: Any
-) -> None:
+) -> int:
     values = {
         "run_id": run_id,
         "dataset_id": db.scalar(select(Camera.dataset_id).where(Camera.id == camera_id)),
@@ -77,7 +77,7 @@ def add_prediction(
         "stock_confidence": 0.8,
         **overrides,
     }
-    db.execute(insert(Prediction).values(**values))
+    return db.execute(insert(Prediction).values(**values).returning(Prediction.id)).scalar_one()
 
 
 def add_predicted_frame(
