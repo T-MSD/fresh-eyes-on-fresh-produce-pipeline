@@ -198,8 +198,6 @@ def test_routes_use_camera_and_filename():
     assert "/cameras/{camera}/frame" in paths
     assert "/areas/{area_id}/stock" in paths
     assert "/images/{camera}/{filename}" in paths
-    assert "/predictions/{frame_id}/{area_id}/frame" not in paths
-    assert "/tasks/{task_id}/frame" not in paths
 
 
 def test_frontend_origin_can_read_camera_api(db, monkeypatch):

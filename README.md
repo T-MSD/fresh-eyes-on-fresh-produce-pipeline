@@ -108,9 +108,8 @@ uv run --env-file .env uvicorn src.main:app --reload
 ```
 
 `GET /hour-range` returns the earliest and latest frame timestamps with predictions in the
-most recent completed run. The `/hour-range` and `/tasks` queries use
-`config.db.queries.latest_run()` to scope records to the newest completed run by `started_at`,
-breaking ties by the highest `id`.
+most recent completed run. All API record queries must use `config.db.queries.latest_run()`
+to scope records to the newest completed run by `started_at`, breaking ties by the highest `id`.
 Only completed (`done`) runs are selected; an empty newest completed run never falls back to
 an older run. Newer `running` or `failed` runs are skipped.
 
