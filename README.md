@@ -163,10 +163,11 @@ An invalid body or unknown `kind` returns `422`.
 
 `GET /predictions?at=&camera=` feeds the Store page: the state of every camera at one moment of
 the most recent completed run, with the same `latest_run()` selection as `/hour-range`. Each
-camera shows its newest frame at or before `at` (an ISO 8601 time with a time zone; without
-`at`, its newest frame), with the predictions for every area of that frame. A camera without a
-frame by `at` is left out. The optional `camera` keeps only that camera; an unknown camera
-returns no cameras.
+camera shows the same frame as `GET /cameras/{camera}/frame?at=`: both use `latest_frames()`,
+the newest frame at or before `at` (an ISO 8601 time with a time zone; without `at`, the newest
+frame) in the run's dataset, with or without predictions, ties resolved to the highest filename.
+A camera without a frame by `at` is left out. The optional `camera` keeps only that camera; an
+unknown camera returns no cameras.
 
 ```json
 {
@@ -175,19 +176,28 @@ returns no cameras.
     "frame": { "filename": "1751052241.jpg", "ts": "2025-06-27T19:24:01Z" },
     "areas": [{
       "area_id": "6215_2", "product_id": "11908", "product_name": "BANANA CAT I CNT KG",
-      "detected_product_id": "11909", "status": "wrong_product",
-      "planogram_compliant": false, "stock_level": "half", "stock_value": 0.5,
-      "compliance_confidence": 0.71, "stock_confidence": null
+      "status": "wrong_product",
+      "prediction": {
+        "planogram_compliant": false, "stock_level": "half", "stock_value": 0.5,
+        "detected_product_id": "11909", "detected_product_name": "BANANA CAT I CNT KG",
+        "compliance_confidence": 0.71, "stock_confidence": null
+      }
+    }, {
+      "area_id": "6215_3", "product_id": "11908", "product_name": "BANANA CAT I CNT KG",
+      "status": "unknown", "prediction": null
     }]
   }]
 }
 ```
 
-An area's `status` is `empty`, else `wrong_product` when it is not compliant, else `half`, else
-`ok`. Areas are sorted by area number. Cameras are sorted most urgent first: more `empty` areas,
-then more `wrong_product`, then more `half`, then camera id. A confidence is `null` when the
-method gives no estimate. With no completed runs, the endpoint returns `404` with
-`{"detail": "No completed runs available"}`.
+Every area of the camera is listed, sorted by area number, so `areas` is the camera's full
+planogram. An area without a prediction in that frame and run has `status: unknown` and
+`prediction: null`; older frames and runs never fill the gap, so an empty completed run shows
+every area as `unknown`. Otherwise `status` is `empty`, else `wrong_product` when it is not
+compliant, else `half`, else `ok`. Cameras are sorted most urgent first: more `empty` areas,
+then more `wrong_product`, then more `half`, then camera id; `unknown` areas do not raise
+urgency. A confidence is `null` when the method gives no estimate. With no completed runs, the
+endpoint returns `404` with `{"detail": "No completed runs available"}`.
 
 ## Layout
 

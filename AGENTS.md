@@ -85,13 +85,17 @@ invalid body or unknown `kind` returns `422`.
 completed (`done`) run. `run_id` identifies the selected run; `start` and `end` are full frame
 timestamps, or both `null` when that run has no predictions.
 
-`GET /predictions?at=&camera=` returns `{cameras}` for the Store page: per camera of the most
-recent completed (`done`) run, its newest frame at or before `at`: `camera`, `frame`
-(`{filename, ts}`) and `areas` by area number, each with `area_id`,
-`product_id`, `product_name`, `detected_product_id`, `status` (`empty` / `wrong_product` /
-`half` / `ok`), `planogram_compliant`, `stock_level`, `stock_value`, `compliance_confidence` and
-`stock_confidence`. Cameras come most urgent first: more `empty`, then more `wrong_product`,
-then more `half`, then camera id.
+A camera's frame at `at` is its newest frame at or before `at` in the latest completed run's
+dataset, with or without predictions in that run; frames tied on time resolve to the highest
+filename. `config.db.queries.latest_frames()` is the only place that picks it: `/predictions`
+and `/cameras/{camera}/frame` both use it, so they always show the same frame.
+
+`GET /predictions?at=&camera=` returns `{cameras}` for the Store page: per camera, its frame at
+`at`: `camera`, `frame` (`{filename, ts}`) and every camera area by area number, each with
+`area_id`, `product_id`, `product_name`, `status` (`empty` / `wrong_product` / `half` / `ok` /
+`unknown`) and `prediction` (the camera view's prediction shape, `null` and `status: unknown`
+when the area has no prediction in that frame). Cameras come most urgent first: more `empty`,
+then more `wrong_product`, then more `half`, then camera id.
 
 These endpoints skip `running` and `failed` runs, order completed runs by `started_at` then `id`
 descending, and return `404` with `{"detail": "No completed runs available"}` when none exist.

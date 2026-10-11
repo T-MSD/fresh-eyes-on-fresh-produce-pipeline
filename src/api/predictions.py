@@ -1,11 +1,11 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Query
-from pydantic import AwareDatetime, BaseModel, computed_field
+from pydantic import AwareDatetime, BaseModel
 
 from config.db.queries import AreaStatus, get_predictions
-from config.db.schema import STOCK_VALUES, StockLevel
 from src.api.dependencies import CompletedRun, DatabaseConnection
+from src.api.models import PredictionResponse
 
 router = APIRouter()
 
@@ -14,17 +14,8 @@ class StoreAreaResponse(BaseModel):
     area_id: str
     product_id: str
     product_name: str
-    detected_product_id: str | None
     status: AreaStatus
-    planogram_compliant: bool
-    stock_level: StockLevel
-    compliance_confidence: float | None
-    stock_confidence: float | None
-
-    @computed_field
-    @property
-    def stock_value(self) -> float:
-        return STOCK_VALUES[self.stock_level]
+    prediction: PredictionResponse | None
 
 
 class StoreFrameResponse(BaseModel):
