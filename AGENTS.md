@@ -105,6 +105,13 @@ Empty completed runs never fall back to older runs.
 
 Every timestamp a query returns is in UTC; the API sends it as ISO 8601 ending in `Z`.
 
+`GET /cameras` returns `{cameras}`, every camera of the latest completed run's dataset by
+camera id, with or without frames: `camera`, `camera_name` (may be null) and `areas`, the
+camera's planogram by area number, each `{area_id, number, product_id, product_name,
+corners}`, with corners as in `GET /cameras/{camera}/frame`, negative coordinates included.
+A camera without areas has `areas: []`. No completed run returns `404` with
+`{"detail": "No completed runs available"}`.
+
 `GET /cameras/{camera}/frame?at=<ISO 8601 Z>` returns the last frame at or before `at`,
 or the latest frame when omitted, in the latest completed run's dataset. The response is
 `{camera, camera_name, filename, ts, width, height, areas}`. Camera name and dimensions may

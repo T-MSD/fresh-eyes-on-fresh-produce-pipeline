@@ -5,17 +5,27 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import AwareDatetime
 
-from config.db.queries import get_area_stock, get_camera_frame, get_camera_frame_areas
+from config.db.queries import get_area_stock, get_camera_frame, get_camera_frame_areas, get_cameras
 from src.api.dependencies import CompletedRun, DatabaseConnection, RequestedFrame
 from src.api.models import (
     AreaStockResponse,
-    CornersResponse,
+    CameraResponse,
+    CamerasResponse,
     FrameAreaResponse,
     FrameResponse,
-    PredictionResponse,
 )
 
 router = APIRouter(tags=["frames"])
+
+
+@router.get("/cameras", responses={404: {"description": "No completed runs available"}})
+def cameras(connection: DatabaseConnection, run: CompletedRun) -> CamerasResponse:
+    return CamerasResponse(
+        cameras=[
+            CameraResponse.model_validate(camera, from_attributes=True)
+            for camera in get_cameras(connection, run)
+        ]
+    )
 
 
 @router.get(
@@ -30,26 +40,10 @@ def get_frame(
     frame = get_camera_frame(connection, run, camera, at)
     if frame is None:
         raise HTTPException(status_code=404, detail="Frame not found in the latest completed run")
-    areas = []
-    for row in get_camera_frame_areas(connection, run, frame):
-        prediction = None
-        if row.prediction is not None:
-            prediction = PredictionResponse.model_validate(row.prediction, from_attributes=True)
-        areas.append(
-            FrameAreaResponse(
-                area_id=row.area_id,
-                number=row.number,
-                product_id=row.product_id,
-                product_name=row.product_name,
-                corners=CornersResponse(
-                    top_left=row.top_left,
-                    top_right=row.top_right,
-                    bottom_right=row.bottom_right,
-                    bottom_left=row.bottom_left,
-                ),
-                prediction=prediction,
-            )
-        )
+    areas = [
+        FrameAreaResponse.model_validate(area, from_attributes=True)
+        for area in get_camera_frame_areas(connection, run, frame)
+    ]
     return FrameResponse(
         camera=frame.camera,
         camera_name=frame.camera_name,

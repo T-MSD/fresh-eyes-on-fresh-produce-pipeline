@@ -222,6 +222,8 @@ out/                                    # pipeline outputs (gitignored)
 ## Camera view
 
 ```text
+GET /cameras
+    → latest completed run's dataset → every camera and its planogram areas
 GET /cameras/{camera}/frame?at=<ISO 8601 Z>
     → latest completed run → last frame at or before at → areas and predictions
 GET /images/{camera}/{filename}
@@ -229,6 +231,26 @@ GET /images/{camera}/{filename}
 GET /areas/{area_id}/stock
     → latest completed run → stock history in timestamp order
 ```
+
+The camera list lets the frontend show every camera, including one with no frame at the
+selected time, without knowing camera ids in advance:
+
+```json
+{
+  "cameras": [{
+    "camera": "6215", "camera_name": null,
+    "areas": [{
+      "area_id": "6215_1", "number": 1, "product_id": "20923",
+      "product_name": "BANANA DA MADEIRA CNT KG",
+      "corners": { "top_left": [370, 179], "top_right": [633, 171],
+                   "bottom_right": [629, 248], "bottom_left": [384, 255] }
+    }]
+  }]
+}
+```
+
+Cameras are sorted by camera id and areas by area number. Cameras without frames or areas are
+included; a camera without areas has `areas: []`.
 
 The camera response contains `camera`, `camera_name`, `filename`, `ts`, `width`, `height`
 and `areas`. Omit `at` for the camera's latest frame. An aware timestamp is required when
