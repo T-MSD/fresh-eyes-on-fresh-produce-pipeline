@@ -24,7 +24,6 @@ import sys
 from pathlib import Path
 from typing import Annotated
 
-import joblib
 import numpy as np
 import typer
 
@@ -239,6 +238,8 @@ def main(
         if db:
             store_run(result, crops_dir, dataset_id, data_dir, topk)
         return
+
+    import joblib
 
     from src.train_classifier import proba_of
 
