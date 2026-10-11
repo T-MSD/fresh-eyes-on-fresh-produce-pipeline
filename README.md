@@ -161,6 +161,34 @@ With no completed runs, it returns `404` with `{"detail": "No completed runs ava
 task not in that run returns `404` with `{"detail": "Task not found in the latest completed run"}`.
 An invalid body or unknown `kind` returns `422`.
 
+`GET /predictions?at=&camera=` feeds the Store page: the state of every camera at one moment of
+the most recent completed run, with the same `latest_run()` selection as `/hour-range`. Each
+camera shows its newest frame at or before `at` (an ISO 8601 time with a time zone; without
+`at`, its newest frame), with the predictions for every area of that frame. A camera without a
+frame by `at` is left out. The optional `camera` keeps only that camera; an unknown camera
+returns no cameras.
+
+```json
+{
+  "cameras": [{
+    "camera": "6215",
+    "frame": { "filename": "1751052241.jpg", "ts": "2025-06-27T19:24:01Z" },
+    "areas": [{
+      "area_id": "6215_2", "product_id": "11908", "product_name": "BANANA CAT I CNT KG",
+      "detected_product_id": "11909", "status": "wrong_product",
+      "planogram_compliant": false, "stock_level": "half", "stock_value": 0.5,
+      "compliance_confidence": 0.71, "stock_confidence": null
+    }]
+  }]
+}
+```
+
+An area's `status` is `empty`, else `wrong_product` when it is not compliant, else `half`, else
+`ok`. Areas are sorted by area number. Cameras are sorted most urgent first: more `empty` areas,
+then more `wrong_product`, then more `half`, then camera id. A confidence is `null` when the
+method gives no estimate. With no completed runs, the endpoint returns `404` with
+`{"detail": "No completed runs available"}`.
+
 ## Layout
 
 ```

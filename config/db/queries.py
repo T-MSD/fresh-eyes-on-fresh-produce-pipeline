@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 
 from sqlalchemy import Connection, Subquery, case, func, select, update
+from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import aliased
 
 from config.db.schema import (
@@ -17,7 +19,10 @@ from config.db.schema import (
     TaskKind,
 )
 
+AreaStatus = Literal["empty", "wrong_product", "half", "ok"]
+
 TASK_PRIORITY: dict[TaskKind, int] = {"restock": 1, "move_product": 2, "top_up": 3}
+URGENT: tuple[AreaStatus, ...] = ("empty", "wrong_product", "half")
 
 
 @dataclass(frozen=True)
@@ -47,6 +52,41 @@ class PendingTask:
 @dataclass(frozen=True)
 class PendingTasks:
     tasks: list[PendingTask]
+
+
+@dataclass(frozen=True)
+class StoreArea:
+    area_id: str
+    product_id: str
+    product_name: str
+    detected_product_id: str | None
+    status: AreaStatus
+    planogram_compliant: bool
+    stock_level: StockLevel
+    compliance_confidence: float | None
+    stock_confidence: float | None
+
+
+@dataclass(frozen=True)
+class StoreFrame:
+    filename: str
+    ts: datetime
+
+
+@dataclass(frozen=True)
+class StoreCamera:
+    camera: str
+    frame: StoreFrame
+    areas: list[StoreArea]
+
+    @property
+    def urgency(self) -> tuple[int, ...]:
+        return tuple(-sum(area.status == status for area in self.areas) for status in URGENT)
+
+
+@dataclass(frozen=True)
+class StorePredictions:
+    cameras: list[StoreCamera]
 
 
 def latest_run() -> Subquery:
@@ -245,6 +285,85 @@ def get_hour_range(connection: Connection) -> HourRange | None:
     if row is None:
         return None
     return HourRange(run_id=row[0], start=row[1], end=row[2])
+
+
+def get_predictions(
+    connection: Connection,
+    run: SelectedRun,
+    at: datetime | None = None,
+    camera: str | None = None,
+) -> StorePredictions:
+    """Each camera's latest frame in the run, most urgent camera first.
+
+    The latest frame is the newest at or before `at`; a camera without one is left out. An
+    area is `empty`, else `wrong_product` when not compliant, else `half`, else `ok`. Cameras
+    with more empty areas come first, then more wrong products, then more half areas, then by
+    camera id. `camera` keeps only that camera; an unknown camera has none.
+    """
+    latest_frames = (
+        select(Prediction.frame_id)
+        .join(Frame, Frame.id == Prediction.frame_id)
+        .where(Prediction.run_id == run.id)
+        .ext(distinct_on(Prediction.camera_id))
+        .order_by(Prediction.camera_id, Frame.ts.desc(), Frame.id.desc())
+    )
+    if at is not None:
+        latest_frames = latest_frames.where(Frame.ts <= at)
+    expected, detected = aliased(Product), aliased(Product)
+    status = case(
+        (Prediction.stock_level == "empty", "empty"),
+        (Prediction.planogram_compliant.is_(False), "wrong_product"),
+        (Prediction.stock_level == "half", "half"),
+        else_="ok",
+    )
+    statement = (
+        select(
+            Camera.external_id,
+            Frame.filename,
+            Frame.ts,
+            Area.external_id,
+            expected.external_id,
+            expected.name,
+            detected.external_id,
+            status,
+            Prediction.planogram_compliant,
+            Prediction.stock_level,
+            Prediction.compliance_confidence,
+            Prediction.stock_confidence,
+        )
+        .select_from(Prediction)
+        .join(Frame, Frame.id == Prediction.frame_id)
+        .join(Area, Area.id == Prediction.area_id)
+        .join(Camera, Camera.id == Prediction.camera_id)
+        .join(expected, expected.id == Area.product_id)
+        .outerjoin(detected, detected.id == Prediction.detected_product_id)
+        .where(Prediction.run_id == run.id, Prediction.frame_id.in_(latest_frames))
+        .order_by(Camera.external_id, Area.number)
+    )
+    if camera is not None:
+        statement = statement.where(Camera.external_id == camera)
+    cameras: dict[str, StoreCamera] = {}
+    for row in connection.execute(statement):
+        if row[0] not in cameras:
+            cameras[row[0]] = StoreCamera(
+                camera=row[0],
+                frame=StoreFrame(filename=row[1], ts=row[2]),
+                areas=[],
+            )
+        cameras[row[0]].areas.append(
+            StoreArea(
+                area_id=row[3],
+                product_id=row[4],
+                product_name=row[5],
+                detected_product_id=row[6],
+                status=row[7],
+                planogram_compliant=row[8],
+                stock_level=row[9],
+                compliance_confidence=row[10],
+                stock_confidence=row[11],
+            )
+        )
+    return StorePredictions(cameras=sorted(cameras.values(), key=lambda c: c.urgency))
 
 
 def get_pending_tasks(connection: Connection) -> PendingTasks | None:

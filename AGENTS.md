@@ -83,10 +83,19 @@ invalid body or unknown `kind` returns `422`.
 
 `GET /hour-range` returns `{run_id, start, end}` for frames with predictions in the most recent
 completed (`done`) run. `run_id` identifies the selected run; `start` and `end` are full frame
-timestamps, or both `null` when that run has no predictions. Both endpoints skip `running` and
-`failed` runs, order completed runs by `started_at` then `id` descending, and return `404` with
-`{"detail": "No completed runs available"}` when none exist. Empty completed runs never fall
-back to older runs.
+timestamps, or both `null` when that run has no predictions.
+
+`GET /predictions?at=&camera=` returns `{cameras}` for the Store page: per camera of the most
+recent completed (`done`) run, its newest frame at or before `at`: `camera`, `frame`
+(`{filename, ts}`) and `areas` by area number, each with `area_id`,
+`product_id`, `product_name`, `detected_product_id`, `status` (`empty` / `wrong_product` /
+`half` / `ok`), `planogram_compliant`, `stock_level`, `stock_value`, `compliance_confidence` and
+`stock_confidence`. Cameras come most urgent first: more `empty`, then more `wrong_product`,
+then more `half`, then camera id.
+
+These endpoints skip `running` and `failed` runs, order completed runs by `started_at` then `id`
+descending, and return `404` with `{"detail": "No completed runs available"}` when none exist.
+Empty completed runs never fall back to older runs.
 
 Every timestamp a query returns is in UTC; the API sends it as ISO 8601 ending in `Z`.
 

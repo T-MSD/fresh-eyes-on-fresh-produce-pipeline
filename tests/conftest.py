@@ -5,10 +5,12 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi.testclient import TestClient
 from sqlalchemy import Connection, Engine, text
 from sqlalchemy.engine import URL, make_url
 
-from config.db.connection import make_engine
+from config.db.connection import get_connection, make_engine
+from src.main import app
 from tests.db_builders import add_camera, add_dataset, add_product
 
 PYPROJECT = Path(__file__).resolve().parent.parent / "pyproject.toml"
@@ -72,3 +74,13 @@ def dataset(db: Connection) -> int:
 def camera(db: Connection, dataset: int) -> int:
     add_product(db, dataset)
     return add_camera(db, dataset, "6215")
+
+
+@pytest.fixture
+def client(db: Connection) -> Iterator[TestClient]:
+    app.dependency_overrides[get_connection] = lambda: db
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        app.dependency_overrides.clear()
