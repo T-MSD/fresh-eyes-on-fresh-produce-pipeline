@@ -148,6 +148,19 @@ still open at any moment; `closed` is `null` while a task is open. With no compl
 the endpoint returns `404` with `{"detail": "No completed runs available"}`. Interactive API
 documentation is at `/docs`.
 
+`POST /tasks/done` marks one task of the most recent completed run as done. The body names the
+task with the `area_id`, `kind` and `opened.filename` that `GET /tasks` returns:
+
+```json
+{ "area_id": "6215_2", "kind": "top_up", "opened_filename": "1751052241.jpg" }
+```
+
+It sets the task's `done_at` and returns `204` with no body; the task then disappears from
+`GET /tasks`. Marking a task already done also returns `204` and keeps its first `done_at`.
+With no completed runs, it returns `404` with `{"detail": "No completed runs available"}`; a
+task not in that run returns `404` with `{"detail": "Task not found in the latest completed run"}`.
+An invalid body or unknown `kind` returns `422`.
+
 ## Layout
 
 ```

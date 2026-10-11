@@ -2,18 +2,23 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection, select, text
+from sqlalchemy import Connection, Engine, select, text
 
 from config.db.connection import get_connection
-from config.db.schema import Task
-from src.api.dependencies import transaction
+from config.db.queries import get_latest_run, mark_task_done
+from config.db.schema import Base, Task
+from src.api.dependencies import Transaction, transaction
 from src.main import app, create_app
 from tests.db_builders import (
     add_area,
+    add_camera,
+    add_dataset,
     add_frame,
     add_predicted_frame,
     add_prediction,
+    add_product,
     add_run,
     add_task,
 )
@@ -278,6 +283,7 @@ def test_task_of_an_older_run_is_not_found(
     response = client.post("/tasks/done", json=done_body())
 
     assert response.status_code == 404
+    assert response.json() == {"detail": "Task not found in the latest completed run"}
     assert done_at(db, task_id) is None
 
 
@@ -307,3 +313,65 @@ def test_frontend_origin_can_mark_tasks_done(monkeypatch):
 
     assert response.status_code == 200
     assert "POST" in response.headers["access-control-allow-methods"]
+
+
+@pytest.fixture
+def committed(engine: Engine) -> Iterator[Engine]:
+    try:
+        yield engine
+    finally:
+        tables = ", ".join(table.name for table in Base.metadata.sorted_tables)
+        with engine.begin() as conn:
+            conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+
+
+def add_committed_task(engine: Engine) -> int:
+    with engine.begin() as db:
+        dataset = add_dataset(db)
+        add_product(db, dataset)
+        camera = add_camera(db, dataset, "6215")
+        run_id, area_id = add_run(db, dataset, status="done"), add_area(db, camera, 1)
+        return add_task(db, run_id, area_id, add_predicted_frame(db, run_id, area_id, camera))
+
+
+def committed_done_at(engine: Engine, task_id: int) -> datetime | None:
+    with engine.connect() as db:
+        return done_at(db, task_id)
+
+
+def committed_client(engine: Engine, app: FastAPI) -> TestClient:
+    def connect() -> Iterator[Connection]:
+        with engine.connect() as connection:
+            yield connection
+
+    app.dependency_overrides[get_connection] = connect
+    return TestClient(app)
+
+
+def test_marking_done_is_committed(committed: Engine):
+    task_id = add_committed_task(committed)
+
+    with committed_client(committed, create_app()) as client:
+        response = client.post("/tasks/done", json=done_body())
+
+    assert response.status_code == 204
+    assert committed_done_at(committed, task_id) is not None
+
+
+def test_a_failing_write_is_rolled_back(committed: Engine):
+    task_id = add_committed_task(committed)
+    app = create_app()
+
+    @app.post("/fail-after-marking-done")
+    def fail_after_marking_done(connection: Transaction) -> None:
+        run = get_latest_run(connection)
+        if run is not None and mark_task_done(
+            connection, run, "6215_1", "restock", "1751052241.jpg"
+        ):
+            raise HTTPException(status_code=409)
+
+    with committed_client(committed, app) as client:
+        response = client.post("/fail-after-marking-done")
+
+    assert response.status_code == 409
+    assert committed_done_at(committed, task_id) is None
