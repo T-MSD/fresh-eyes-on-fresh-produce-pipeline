@@ -1,5 +1,6 @@
 import subprocess
 from collections.abc import Collection
+from dataclasses import asdict, dataclass, replace
 from itertools import groupby
 from pathlib import Path
 from typing import Any
@@ -64,11 +65,13 @@ def save_run(
     params: dict[str, Any] | None = None,
     fallback: Collection[tuple[str, str, str]] = (),
 ) -> int:
-    """Store one run and a prediction for every area of every frame, all or nothing.
+    """Store one run, a prediction for every area of every frame and the run's tasks, all or
+    nothing.
 
     `predictions` is the submission shape (camera -> frame -> area -> label). `fallback` holds the
     (camera, frame, area) triples that are a fallback, not a model answer. A run missing an area,
-    or naming a frame or area the dataset does not have, is refused: a gap costs -5 points.
+    or naming a frame or area the dataset does not have, is refused: a gap costs -5 points. Tasks
+    come from `derive_tasks`.
     """
     parsed = SubmissionShape.validate_python(predictions)
     if not conn.scalar(select(DatasetLoad.id).where(DatasetLoad.id == dataset_id)):
@@ -146,6 +149,14 @@ def save_run(
     return run_id
 
 
+@dataclass(frozen=True)
+class DerivedTask:
+    area_id: int
+    kind: TaskKind
+    opened_frame_id: int
+    closed_frame_id: int | None = None
+
+
 def task_kind(stock_level: StockLevel, planogram_compliant: bool) -> TaskKind | None:
     if stock_level == "empty":
         return "restock"
@@ -180,25 +191,18 @@ def derive_tasks(conn: Connection, run_id: int) -> int:
         .order_by(Prediction.area_id, Frame.ts, Frame.filename)
     ).all()
 
-    tasks: list[dict[str, Any]] = []
+    tasks: list[DerivedTask] = []
     for area_id, frames in groupby(rows, key=lambda row: row.area_id):
-        current: dict[str, Any] | None = None
+        open_task: DerivedTask | None = None
         for row in frames:
             kind = task_kind(row.stock_level, row.planogram_compliant)
-            if current is not None and current["kind"] == kind:
+            if open_task is not None and open_task.kind == kind:
                 continue
-            if current is not None:
-                current["closed_frame_id"] = row.frame_id
-            current = None
-            if kind is not None:
-                current = {
-                    "run_id": run_id,
-                    "area_id": area_id,
-                    "kind": kind,
-                    "opened_frame_id": row.frame_id,
-                    "closed_frame_id": None,
-                }
-                tasks.append(current)
+            if open_task is not None:
+                tasks.append(replace(open_task, closed_frame_id=row.frame_id))
+            open_task = DerivedTask(area_id, kind, row.frame_id) if kind is not None else None
+        if open_task is not None:
+            tasks.append(open_task)
     if tasks:
-        conn.execute(insert(Task), tasks)
+        conn.execute(insert(Task), [{"run_id": run_id, **asdict(task)} for task in tasks])
     return len(tasks)
