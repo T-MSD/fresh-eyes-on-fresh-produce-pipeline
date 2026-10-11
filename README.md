@@ -66,6 +66,9 @@ areas keep the planogram id (`6215`, `11908`, `6215_2`) in `external_id`, unique
 dataset: a judge planogram can reuse the same ids in a later load. Generated ids stay inside the database;
 everything outside it uses `external_id`.
 
+Every timestamp is a `timestamptz` column of type `UTCDateTime`, so every query reads it back in
+UTC, whatever the session time zone.
+
 Composite foreign keys keep each row inside one dataset: an area's camera and product, and a
 prediction's run, camera and detected product, all belong to the same dataset.
 
@@ -97,6 +100,35 @@ above `MAX_FRAME_PIXELS` (checked before decoding, so a bad header cannot alloca
 does not decode to the size it declares. EXIF rotation may swap width and height; the stored size
 is the decoded one, the image the planogram corners refer to. Unreadable images are listed and
 stored without a size, so their areas still get a fallback.
+
+## API
+
+```bash
+uv run --env-file .env uvicorn src.main:app --reload
+```
+
+`GET /tasks` returns the tasks of the most recent run that staff have not marked done. All API
+record queries must use `config.db.queries.latest_run()` to scope records to the run with the
+newest `started_at`, breaking ties by the highest `id`. Run status does not affect selection;
+a newest run without pending tasks never falls back to an older run.
+
+```json
+{
+  "tasks": [{
+    "camera": "6215", "area_id": "6215_2", "product_id": "11908",
+    "product_name": "BANANA CAT I CNT KG", "kind": "top_up",
+    "opened": { "filename": "1751052241.jpg", "ts": "2025-06-27T19:24:01Z" },
+    "closed": { "filename": "1751055841.jpg", "ts": "2025-06-27T20:24:01Z" }
+  }]
+}
+```
+
+Tasks are sorted by priority (`restock`, `move_product`, `top_up`), then by opening time,
+camera and area, with creation order breaking any remaining tie. No database id is returned.
+Closed tasks are included with their closing frame, so the time slider can tell which were
+still open at any moment; `closed` is `null` while a task is open. With no runs, the endpoint
+returns `404` with `{"detail": "No runs available"}`. Interactive API documentation is at
+`/docs`.
 
 ## Layout
 

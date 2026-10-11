@@ -1,15 +1,17 @@
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal, get_args
 
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    Dialect,
     Enum,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
     MetaData,
+    TypeDecorator,
     UniqueConstraint,
     func,
     text,
@@ -23,6 +25,16 @@ TaskKind = Literal["restock", "move_product", "top_up"]
 
 STOCK_VALUES: dict[StockLevel, float] = {"empty": 0.0, "half": 0.5, "full": 1.0}
 CORNERS = ("top_left", "top_right", "bottom_right", "bottom_left")
+
+
+class UTCDateTime(TypeDecorator[datetime]):
+    """A `timestamptz` that reads back in UTC, whatever the session time zone."""
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_result_value(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        return value.astimezone(UTC) if value is not None else None
 
 
 class Base(DeclarativeBase):
@@ -43,7 +55,7 @@ class Dataset(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     planogram_path: Mapped[str]
     images_dir: Mapped[str]
-    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    loaded_at: Mapped[datetime] = mapped_column(UTCDateTime, server_default=func.now())
 
 
 class Camera(Base):
@@ -121,7 +133,7 @@ class Frame(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     camera_id: Mapped[int] = mapped_column(ForeignKey("cameras.id"))
     filename: Mapped[str]
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ts: Mapped[datetime] = mapped_column(UTCDateTime)
     width: Mapped[int | None]
     height: Mapped[int | None]
 
@@ -144,8 +156,8 @@ class Run(Base):
     status: Mapped[RunStatus] = mapped_column(
         Enum(*get_args(RunStatus), name="run_status"), server_default="running"
     )
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     score: Mapped[int | None]
     compliance_points: Mapped[int | None]
     stock_points: Mapped[int | None]
@@ -226,4 +238,4 @@ class Task(Base):
     kind: Mapped[TaskKind] = mapped_column(Enum(*get_args(TaskKind), name="task_kind"))
     opened_frame_id: Mapped[int]
     closed_frame_id: Mapped[int | None]
-    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    done_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
