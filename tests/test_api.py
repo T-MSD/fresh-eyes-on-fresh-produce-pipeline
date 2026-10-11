@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Connection, text
 
 from config.db.connection import get_connection
-from src.api.hour_range import HourRangeResponse
 from src.main import app
 from tests.db_builders import (
     add_area,
@@ -162,19 +161,6 @@ def test_new_dataset_load_does_not_replace_latest_run(db: Connection, client: Te
     assert payload["run_id"] == run
     assert datetime.fromisoformat(payload["start"]) == timestamp
     assert datetime.fromisoformat(payload["end"]) == timestamp
-
-
-@pytest.mark.parametrize("start", [None, "2025-06-27T20:24:01+01:00"])
-@pytest.mark.parametrize("end", [None, "2025-06-27T17:24:01-04:00"])
-def test_hour_range_response_normalizes_offsets_to_utc(start: str | None, end: str | None):
-    response = HourRangeResponse.model_validate({"run_id": 1, "start": start, "end": end})
-    payload = response.model_dump(mode="json")
-    for field, original in [("start", start), ("end", end)]:
-        if original is None:
-            assert payload[field] is None
-        else:
-            assert datetime.fromisoformat(payload[field]) == datetime.fromisoformat(original)
-            assert payload[field].endswith("Z")
 
 
 @pytest.mark.parametrize("timezone", ["UTC", "Europe/Lisbon", "America/New_York"])

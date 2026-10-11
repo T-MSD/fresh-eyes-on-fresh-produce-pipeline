@@ -1,8 +1,7 @@
-from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import AwareDatetime, BaseModel, field_validator
+from pydantic import AwareDatetime, BaseModel
 from sqlalchemy import Connection
 
 from config.db.connection import get_connection
@@ -15,11 +14,6 @@ class HourRangeResponse(BaseModel):
     run_id: int
     start: AwareDatetime | None
     end: AwareDatetime | None
-
-    @field_validator("start", "end")
-    @classmethod
-    def normalize_utc(cls, value: datetime | None) -> datetime | None:
-        return value.astimezone(UTC) if value is not None else None
 
 
 @router.get("/hour-range", responses={404: {"description": "No completed runs available"}})

@@ -108,8 +108,8 @@ uv run --env-file .env uvicorn src.main:app --reload
 ```
 
 `GET /hour-range` returns the earliest and latest frame timestamps with predictions in the
-most recent completed run. All API record queries must use `config.db.queries.latest_run()` to scope
-records to the run with the newest `started_at`, breaking ties by the highest `id`.
+most recent completed run. All API record queries must use `config.db.queries.latest_run()`
+to scope records to the newest completed run by `started_at`, breaking ties by the highest `id`.
 Only completed (`done`) runs are selected; an empty newest completed run never falls back to
 an older run. Newer `running` or `failed` runs are skipped.
 
@@ -144,9 +144,9 @@ pending tasks never falls back to an older run.
 Tasks are sorted by priority (`restock`, `move_product`, `top_up`), then by opening time,
 camera and area, with creation order breaking any remaining tie. No database id is returned.
 Closed tasks are included with their closing frame, so the time slider can tell which were
-still open at any moment; `closed` is `null` while a task is open. With no completed runs, the endpoint
-returns `404` with `{"detail": "No completed runs available"}`. Interactive API documentation is at
-`/docs`.
+still open at any moment; `closed` is `null` while a task is open. With no completed runs,
+the endpoint returns `404` with `{"detail": "No completed runs available"}`. Interactive API
+documentation is at `/docs`.
 
 ## Layout
 
