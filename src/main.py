@@ -3,7 +3,6 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.frame_areas import router as frames_router
 from src.api.hour_range import router as hour_range_router
 from src.api.routes import router
 from src.api.tasks import router as tasks_router
@@ -21,7 +20,6 @@ def create_app() -> FastAPI:
         allow_methods=["GET"],
     )
     app.include_router(router)
-    app.include_router(frames_router)
     app.include_router(hour_range_router)
     app.include_router(tasks_router)
     return app
