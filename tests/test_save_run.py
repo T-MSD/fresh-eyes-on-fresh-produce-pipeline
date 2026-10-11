@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -5,7 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import Connection, select
 
 from config.db.load import load_dataset
-from config.db.save_run import UnusableRun, latest_dataset_id, save_run
+from config.db.save_run import UnusableRun, fallback_keys, latest_dataset_id, save_run
 from config.db.schema import Prediction, Run
 from ingest.dataset import read_dataset
 from tests.builders import area, write_dataset
@@ -105,3 +106,12 @@ def test_refuses_an_unknown_dataset(db, dataset_id):
 
 def test_the_newest_load_is_the_default_dataset(db, dataset_id):
     assert latest_dataset_id(db) == dataset_id
+
+
+def test_reads_the_fallback_areas_of_a_crop_areas_file(tmp_path):
+    path = tmp_path / "fallbacks.json"
+    path.write_text(
+        json.dumps({"6383": {"1751052241.jpg": {"6383_1": {**label("empty"), "stock_value": 0.0}}}})
+    )
+
+    assert fallback_keys(path) == {("6383", "1751052241.jpg", "6383_1")}

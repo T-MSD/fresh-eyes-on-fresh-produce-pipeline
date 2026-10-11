@@ -3,10 +3,17 @@ from pathlib import Path
 from typing import Annotated, NoReturn
 
 import typer
+from pydantic import ValidationError
 
 from config.db.connection import make_engine
 from config.db.load import load_dataset
-from config.db.save_run import UnusableRun, latest_dataset_id, save_run
+from config.db.save_run import (
+    SubmissionShape,
+    UnusableRun,
+    fallback_keys,
+    latest_dataset_id,
+    save_run,
+)
 from ingest.dataset import Dataset, read_dataset
 from ingest.errors import InvalidInput
 
@@ -88,15 +95,36 @@ def save_run_command(
     dataset_id: Annotated[
         int | None, typer.Option(help="Dataset load to attach to; default is the newest.")
     ] = None,
+    fallbacks: Annotated[
+        Path | None,
+        typer.Option(
+            exists=True,
+            dir_okay=False,
+            readable=True,
+            help="fallbacks.json from crop_areas: its areas are stored with is_fallback set.",
+        ),
+    ] = None,
 ) -> None:
     """Store a predictions file as a run on a loaded dataset."""
-    raw = json.loads(predictions.read_text())
+    try:
+        raw = json.loads(predictions.read_text())
+        SubmissionShape.validate_python(raw)
+        fallback = fallback_keys(fallbacks) if fallbacks else set()
+    except json.JSONDecodeError as error:
+        fail([f"not valid JSON: {error}"])
+    except ValidationError as error:
+        fail([f"{'/'.join(map(str, e['loc']))}: {e['msg']}" for e in error.errors()[:10]])
     engine = make_engine()
     try:
         with engine.begin() as conn:
             target = dataset_id if dataset_id is not None else latest_dataset_id(conn)
             run_id = save_run(
-                conn, target, raw, method=method, params={"predictions": str(predictions)}
+                conn,
+                target,
+                raw,
+                method=method,
+                params={"predictions": str(predictions)},
+                fallback=fallback,
             )
     except UnusableRun as error:
         fail(error.problems)

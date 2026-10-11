@@ -29,9 +29,9 @@ import numpy as np
 import typer
 
 from config.db.connection import make_engine
-from config.db.save_run import UnusableRun, latest_dataset_id, save_run
+from config.db.save_run import UnusableRun, fallback_keys, latest_dataset_id, save_run
 from src.clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class, softmax
-from src.prediction_io import SUBMISSION, NetworkCrop, merge_fallbacks
+from src.prediction_io import NetworkCrop, merge_fallbacks
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
@@ -106,7 +106,7 @@ def clip_zeroshot(items, crops_dir: Path, classes: list[str], topk: int, cached:
                 f"a supermarket shelf full of piled {c}",
             ]
         )
-        for c in classes
+        for c in [*classes, UNKNOWN_CLASS]
     }
     zs, ok = np.zeros((len(items), 3)), []
     for n, it in enumerate(items):
@@ -163,22 +163,11 @@ def write_predictions(result: dict, out_file: Path) -> None:
     out_file.write_text(json.dumps(result, indent=1))
 
 
-def fallback_keys_of(crops_dir: Path) -> set[tuple[str, str, str]]:
-    path = crops_dir / "fallbacks.json"
-    if not path.exists():
-        return set()
-    return {
-        (camera, image, area)
-        for camera, frames in SUBMISSION.validate_json(path.read_bytes()).items()
-        for image, areas in frames.items()
-        for area in areas
-    }
-
-
 def store_run(
     result: dict, crops_dir: Path, dataset_id: int | None, data_dir: Path | None, topk: int
 ) -> None:
-    fallback = fallback_keys_of(crops_dir)
+    fallbacks_file = crops_dir / "fallbacks.json"
+    fallback = fallback_keys(fallbacks_file) if fallbacks_file.exists() else set()
     engine = make_engine()
     try:
         with engine.begin() as conn:
@@ -256,7 +245,7 @@ def main(
     bundle = joblib.load(BUNDLE)
 
     train_classes = bundle["train_classes"]
-    new_classes = sorted({class_of(i["product_name"]) for i in items})
+    new_classes = sorted({class_of(i["product_name"]) for i in items} - {UNKNOWN_CLASS})
     classes = sorted(set(train_classes) | set(new_classes))
     unseen = sorted(set(new_classes) - set(train_classes))
     if unseen:

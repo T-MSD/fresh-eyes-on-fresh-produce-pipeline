@@ -134,6 +134,7 @@ def test_final_training_rebuilds_model_without_labels_all(tmp_path):
     assert not (tmp_path / "labels_all.json").exists()
     assert (tmp_path / "finetune" / "model.pt").stat().st_size > 0
     assert (tmp_path / "finetune" / "bundle.joblib").stat().st_size > 0
+    assert json.loads((tmp_path / "finetune" / "classes.json").read_text()) == ["bananas"]
     predictions = json.loads((tmp_path / "finetune" / "predictions.json").read_text())
     assert set(predictions["6215"]) == {item["image"] for item in items}
 

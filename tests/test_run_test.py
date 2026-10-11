@@ -4,20 +4,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from tests.builders import area, encode, planogram_json
+
 pytest.importorskip("torch")
 pytest.importorskip("timm")
 pytest.importorskip("open_clip")
 pytest.importorskip("sklearn")
 
-import joblib  # noqa: E402
-import torch  # noqa: E402
-
-from src import run_test  # noqa: E402
-from src.clip_predict import LEVELS  # noqa: E402
-from src.finetune import Net, build_bundle  # noqa: E402
-from tests.builders import area, encode, planogram_json  # noqa: E402
-
 TRAIN_NAMES = ["BANANA CAT I CNT KG", "PERA ROCHA CNT KG", "LIMAO CNT KG"]
+NO_RULE_NAME = "ESPINAFRE FRESCO 200 G"
 
 
 def train_items() -> list[dict]:
@@ -27,7 +22,14 @@ def train_items() -> list[dict]:
     ]
 
 
-def write_bundle(out: Path) -> dict:
+def write_bundle(out: Path) -> None:
+    import joblib
+    import torch
+
+    from src import run_test
+    from src.clip_predict import LEVELS
+    from src.finetune import Net, build_bundle
+
     rng = np.random.default_rng(0)
     items = train_items()
     manual = {i["key"]: {"stock_level": LEVELS[n % 3]} for n, i in enumerate(items)}
@@ -38,7 +40,6 @@ def write_bundle(out: Path) -> dict:
     net = Net(run_test.BACKBONE, len(bundle["train_classes"]), pretrained=False)
     torch.save(net.state_dict(), out / "finetune" / "model.pt")
     (out / "product_groups.json").write_text(json.dumps({}))
-    return bundle
 
 
 def write_dataset(root: Path, names: list[str]) -> None:
@@ -52,6 +53,8 @@ def write_dataset(root: Path, names: list[str]) -> None:
 
 @pytest.fixture
 def isolated_out(tmp_path, monkeypatch):
+    from src import run_test
+
     out = tmp_path / "out"
     out.mkdir()
     monkeypatch.setattr(run_test, "OUT", out)
@@ -61,6 +64,8 @@ def isolated_out(tmp_path, monkeypatch):
 
 
 def run(data_dir: Path, out: Path) -> dict:
+    from src import run_test
+
     out_file = out / "test" / "predictions.json"
     run_test.main(
         data_dir=data_dir,
@@ -107,13 +112,39 @@ def test_every_class_unseen_keeps_the_classifier_prediction_instead_of_crashing(
     assert set(result["6215"]["100.jpg"]) == {"6215_1", "6215_2"}
 
 
-def test_a_product_no_class_rule_knows_is_scored_compliant_instead_of_stopping_the_run(
-    tmp_path, isolated_out
+def test_a_product_no_class_rule_matches_is_compliant_and_named_in_a_warning(
+    tmp_path, isolated_out, capsys
 ):
+    from src.clip_predict import product_class
+
+    with pytest.raises(ValueError):
+        product_class(NO_RULE_NAME)
     write_bundle(isolated_out)
-    write_dataset(tmp_path / "data", ["BANANA CAT I CNT KG", "CEBOLA AMARELA CNT KG"])
+    write_dataset(tmp_path / "data", ["BANANA CAT I CNT KG", NO_RULE_NAME])
 
     result = run(tmp_path / "data", isolated_out)
 
-    assert result["6215"]["100.jpg"]["6215_1"]["planogram_compliant"] is True
+    assert result["6215"]["100.jpg"]["6215_2"]["planogram_compliant"] is True
     assert set(result["6215"]["100.jpg"]) == {"6215_1", "6215_2"}
+    assert f"no class rule for ['{NO_RULE_NAME}']" in capsys.readouterr().out
+
+
+def test_the_generic_class_is_never_one_of_the_classes_known_areas_compete_in(
+    tmp_path, isolated_out, monkeypatch
+):
+    from src import run_test
+
+    seen: list[list[str]] = []
+    real = run_test.clip_zeroshot
+
+    def record(items, crops_dir, classes, topk, cached):
+        seen.append(list(classes))
+        return real(items, crops_dir, classes, topk, cached)
+
+    monkeypatch.setattr(run_test, "clip_zeroshot", record)
+    write_bundle(isolated_out)
+    write_dataset(tmp_path / "data", ["BANANA CAT I CNT KG", NO_RULE_NAME])
+
+    run(tmp_path / "data", isolated_out)
+
+    assert seen == [sorted({"bananas", "pears", "lemons"})]

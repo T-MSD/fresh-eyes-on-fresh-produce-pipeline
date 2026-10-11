@@ -27,6 +27,16 @@ class UnusableRun(Exception):
         self.problems = problems
 
 
+def fallback_keys(path: Path) -> set[tuple[str, str, str]]:
+    """The (camera, frame, area) triples of a fallbacks.json file written by crop_areas."""
+    return {
+        (camera, frame, area)
+        for camera, by_frame in SubmissionShape.validate_json(path.read_bytes()).items()
+        for frame, by_area in by_frame.items()
+        for area in by_area
+    }
+
+
 def git_sha() -> str | None:
     try:
         done = subprocess.run(

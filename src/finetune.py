@@ -12,6 +12,8 @@ classes) and planogram_compliant.
             then writes out/finetune/predictions.json, model.pt and the inference bundle
             out/finetune/bundle.joblib next to it. It does not touch out/predictions.json.
   --bundle-only  rebuilds bundle.joblib from the current crops index and labels, without training.
+            It stops unless the classes of that index match the ones in out/finetune/classes.json,
+            written next to model.pt.
 
     uv run --extra ml --env-file .env python -m src.finetune --holdout 6371,6443,6591
     uv run --extra ml --env-file .env python -m src.finetune --final
@@ -38,6 +40,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 WORK = OUT / "finetune"
 BUNDLE = WORK / "bundle.joblib"
+CLASSES = WORK / "classes.json"
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
@@ -115,7 +118,7 @@ def build_bundle(items: list[dict], manual: dict, emb: np.ndarray, fill: dict) -
     key_row = {i["key"]: n for n, i in enumerate(items)}
     fill_keys = [k for k in fill if k in key_row]
     return {
-        "train_classes": sorted({product_class(i["product_name"]) for i in items}),
+        "train_classes": head_classes(items),
         "emb_mean": mean,
         "emb_std": std,
         "classifier": fit_classifier(x[rows], y, 0.1),
@@ -123,6 +126,25 @@ def build_bundle(items: list[dict], manual: dict, emb: np.ndarray, fill: dict) -
             x[[key_row[k] for k in fill_keys]], np.array([fill[k] for k in fill_keys], dtype=float)
         ),
     }
+
+
+def head_classes(items: list[dict]) -> list[str]:
+    return sorted({product_class(i["product_name"]) for i in items})
+
+
+def check_head_classes(work_dir: Path, items: list[dict]) -> None:
+    """Stop unless the classes of `items` are, in order, the ones model.pt was trained with."""
+    path = work_dir / CLASSES.name
+    if not path.exists():
+        raise typer.BadParameter(
+            f"{path} is missing, so the class order of model.pt is unknown: run finetune --final"
+        )
+    trained, current = json.loads(path.read_text()), head_classes(items)
+    if trained != current:
+        raise typer.BadParameter(
+            f"model.pt was trained with {trained}, the crops index now gives {current}: "
+            "a bundle built from it would score the wrong products. Run finetune --final"
+        )
 
 
 def load_fill_labels(out_dir: Path = OUT) -> dict:
@@ -186,7 +208,7 @@ def main(
     dropped = set(json.loads(ignore.read_text())) if ignore else set()
     manual_train = {k: v for k, v in manual.items() if k not in dropped}
     if bundle_only:
-        work_dir.mkdir(parents=True, exist_ok=True)
+        check_head_classes(work_dir, items)
         joblib.dump(
             build_bundle(items, manual, emb, load_fill_labels(out_dir)), work_dir / BUNDLE.name
         )
@@ -198,7 +220,7 @@ def main(
 
     labels = regenerate_labels(items, manual_train, train_cams, emb, zs_probs, zero)
 
-    classes = sorted({product_class(i["product_name"]) for i in items})
+    classes = head_classes(items)
     cls = torch.tensor([classes.index(product_class(i["product_name"])) for i in items])
     imgs = load_crops(items, size, out_dir / "crops", work_dir)
 
@@ -284,6 +306,7 @@ def main(
         np.save(work_dir / "stock_probs.npy", p_stock)
         np.save(work_dir / "ok_probs.npy", p_ok)
         torch.save(model.state_dict(), work_dir / "model.pt")
+        (work_dir / CLASSES.name).write_text(json.dumps(classes))
         joblib.dump(
             build_bundle(items, manual, emb, load_fill_labels(out_dir)), work_dir / BUNDLE.name
         )
