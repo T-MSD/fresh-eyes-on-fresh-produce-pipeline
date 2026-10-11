@@ -1,12 +1,19 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import Connection, Subquery, case, select
+from sqlalchemy import Connection, Subquery, case, func, select
 from sqlalchemy.orm import aliased
 
-from config.db.schema import Area, Camera, Frame, Product, Run, Task, TaskKind
+from config.db.schema import Area, Camera, Frame, Prediction, Product, Run, Task, TaskKind
 
 TASK_PRIORITY: dict[TaskKind, int] = {"restock": 1, "move_product": 2, "top_up": 3}
+
+
+@dataclass(frozen=True)
+class HourRange:
+    run_id: int
+    start: datetime | None
+    end: datetime | None
 
 
 @dataclass(frozen=True)
@@ -32,11 +39,32 @@ class PendingTasks:
 
 
 def latest_run() -> Subquery:
-    return select(Run.id).order_by(Run.started_at.desc(), Run.id.desc()).limit(1).subquery()
+    return (
+        select(Run.id)
+        .where(Run.status == "done")
+        .order_by(Run.started_at.desc(), Run.id.desc())
+        .limit(1)
+        .subquery()
+    )
+
+
+def get_hour_range(connection: Connection) -> HourRange | None:
+    run = latest_run()
+    statement = (
+        select(run.c.id, func.min(Frame.ts), func.max(Frame.ts))
+        .select_from(run)
+        .outerjoin(Prediction, Prediction.run_id == run.c.id)
+        .outerjoin(Frame, Frame.id == Prediction.frame_id)
+        .group_by(run.c.id)
+    )
+    row = connection.execute(statement).one_or_none()
+    if row is None:
+        return None
+    return HourRange(run_id=row[0], start=row[1], end=row[2])
 
 
 def get_pending_tasks(connection: Connection) -> PendingTasks | None:
-    """Tasks of the latest run not marked done, open or closed, by priority then opening time."""
+    """Pending tasks of the latest completed run, ordered by priority then opening time."""
     run_id = connection.scalar(select(latest_run().c.id))
     if run_id is None:
         return None

@@ -30,9 +30,9 @@ class TasksResponse(BaseModel):
     tasks: list[TaskResponse]
 
 
-@router.get("/tasks", responses={404: {"description": "No runs available"}})
+@router.get("/tasks", responses={404: {"description": "No completed runs available"}})
 def tasks(connection: Annotated[Connection, Depends(get_connection)]) -> TasksResponse:
     result = get_pending_tasks(connection)
     if result is None:
-        raise HTTPException(status_code=404, detail="No runs available")
+        raise HTTPException(status_code=404, detail="No completed runs available")
     return TasksResponse.model_validate(result, from_attributes=True)

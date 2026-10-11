@@ -69,7 +69,16 @@ Every id in these files is a planogram id. In the database it is the `external_i
 
 The rich predictions file for the frontend adds `ts`, `product_id`, `product_name`, `detected_product_id`, `compliance_confidence` and `stock_confidence` per area. A confidence is `null` when the method gives no estimate (fallbacks included); never invent one. The frontend shows `null` as unsure.
 
-`GET /tasks` returns `{tasks}`, the most recent run's tasks not marked done: `camera`, `area_id`, `product_id`, `product_name`, `kind` (`restock` / `move_product` / `top_up`), `opened` and `closed` (`{filename, ts}`, `closed` is `null` while open).
+`GET /tasks` returns `{tasks}`, the most recent completed (`done`) run's tasks not marked done:
+`camera`, `area_id`, `product_id`, `product_name`, `kind` (`restock` / `move_product` / `top_up`),
+`opened` and `closed` (`{filename, ts}`, `closed` is `null` while open).
+
+`GET /hour-range` returns `{run_id, start, end}` for frames with predictions in the most recent
+completed (`done`) run. `run_id` identifies the selected run; `start` and `end` are full frame
+timestamps, or both `null` when that run has no predictions. Both endpoints skip `running` and
+`failed` runs, order completed runs by `started_at` then `id` descending, and return `404` with
+`{"detail": "No completed runs available"}` when none exist. Empty completed runs never fall
+back to older runs.
 
 Every timestamp a query returns is in UTC; the API sends it as ISO 8601 ending in `Z`.
 
