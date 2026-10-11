@@ -9,8 +9,9 @@ from sqlalchemy import Connection, Engine, select, text
 from config.db.connection import get_connection
 from config.db.queries import get_latest_run, mark_task_done
 from config.db.schema import Base, Task
-from src.api.dependencies import Transaction, transaction
-from src.main import app, create_app
+from src.api.dependencies import Transaction
+from src.main import create_app
+from tests.assertions import iso
 from tests.db_builders import (
     add_area,
     add_camera,
@@ -24,21 +25,6 @@ from tests.db_builders import (
 )
 
 MORNING, NOON, EVENING = 1751052241, 1751055841, 1751059441
-
-
-@pytest.fixture
-def client(db: Connection) -> Iterator[TestClient]:
-    app.dependency_overrides[get_connection] = lambda: db
-    app.dependency_overrides[transaction] = lambda: db
-    try:
-        with TestClient(app) as client:
-            yield client
-    finally:
-        app.dependency_overrides.clear()
-
-
-def iso(ts: int) -> str:
-    return datetime.fromtimestamp(ts, UTC).isoformat().replace("+00:00", "Z")
 
 
 def test_tasks_without_runs(client: TestClient):

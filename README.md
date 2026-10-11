@@ -161,6 +161,45 @@ With no completed runs, it returns `404` with `{"detail": "No completed runs ava
 task not in that run returns `404` with `{"detail": "Task not found in the latest completed run"}`.
 An invalid body or unknown `kind` returns `422`.
 
+`GET /predictions?at=&camera=` feeds the Store page: the state of every camera at one moment of
+the most recent completed run, with the same `latest_run()` selection as `/hour-range`. Each
+camera shows the same frame as `GET /cameras/{camera}/frame?at=`: both use `latest_frames()`,
+the newest frame at or before `at` (an ISO 8601 time with a time zone; without `at`, the newest
+frame) in the run's dataset, with or without predictions, ties resolved to the highest filename.
+A camera without a frame by `at` is left out. The optional `camera` keeps only that camera; a
+known camera without a frame by `at` returns `{"cameras": []}`, and a camera that is not in the
+run's dataset returns `404` with `{"detail": "Camera not found in the latest completed run"}`.
+
+```json
+{
+  "cameras": [{
+    "camera": "6215",
+    "frame": { "filename": "1751052241.jpg", "ts": "2025-06-27T19:24:01Z" },
+    "areas": [{
+      "area_id": "6215_2", "product_id": "11908", "product_name": "BANANA CAT I CNT KG",
+      "status": "wrong_product",
+      "prediction": {
+        "planogram_compliant": false, "stock_level": "half", "stock_value": 0.5,
+        "detected_product_id": "11909", "detected_product_name": "BANANA CAT I CNT KG",
+        "compliance_confidence": 0.71, "stock_confidence": null
+      }
+    }, {
+      "area_id": "6215_3", "product_id": "11908", "product_name": "BANANA CAT I CNT KG",
+      "status": "unknown", "prediction": null
+    }]
+  }]
+}
+```
+
+Every area of the camera is listed, sorted by area number, so `areas` is the camera's full
+planogram. An area without a prediction in that frame and run has `status: unknown` and
+`prediction: null`; older frames and runs never fill the gap, so an empty completed run shows
+every area as `unknown`. Otherwise `status` is `empty`, else `wrong_product` when it is not
+compliant, else `half`, else `ok`. Cameras are sorted most urgent first: more `empty` areas,
+then more `wrong_product`, then more `half`, then more `unknown`, then camera id, so a camera
+without data never looks healthier than one that is fully `ok`. A confidence is `null` when the method gives no estimate. With no completed runs, the
+endpoint returns `404` with `{"detail": "No completed runs available"}`.
+
 ## Layout
 
 ```

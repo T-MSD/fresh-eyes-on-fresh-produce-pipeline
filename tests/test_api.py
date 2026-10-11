@@ -1,12 +1,9 @@
-from collections.abc import Iterator
 from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Connection, text
 
-from config.db.connection import get_connection
-from src.main import app
 from tests.db_builders import (
     add_area,
     add_camera,
@@ -16,16 +13,6 @@ from tests.db_builders import (
     add_product,
     add_run,
 )
-
-
-@pytest.fixture
-def client(db: Connection) -> Iterator[TestClient]:
-    app.dependency_overrides[get_connection] = lambda: db
-    try:
-        with TestClient(app) as client:
-            yield client
-    finally:
-        app.dependency_overrides.clear()
 
 
 def test_hour_range_without_runs(client: TestClient):
