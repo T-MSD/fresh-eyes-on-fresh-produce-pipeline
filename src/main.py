@@ -17,7 +17,7 @@ def create_app() -> FastAPI:
             for origin in os.environ.get("CORS_ORIGINS", "").split(",")
             if origin.strip()
         ],
-        allow_methods=["GET"],
+        allow_methods=["GET", "POST"],
     )
     app.include_router(router)
     app.include_router(hour_range_router)

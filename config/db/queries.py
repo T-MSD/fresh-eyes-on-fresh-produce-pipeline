@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import Connection, Subquery, case, func, select
+from sqlalchemy import Connection, Subquery, case, func, select, update
 from sqlalchemy.orm import aliased
 
 from config.db.schema import (
@@ -293,3 +293,27 @@ def get_pending_tasks(connection: Connection) -> PendingTasks | None:
         for row in connection.execute(statement)
     ]
     return PendingTasks(tasks=tasks)
+
+
+def mark_task_done(
+    connection: Connection, run: SelectedRun, area_id: str, kind: TaskKind, opened_filename: str
+) -> bool:
+    """Mark the run's task done; a task already done keeps its first `done_at`.
+
+    Returns whether the task exists.
+    """
+    task_id = connection.scalar(
+        update(Task)
+        .where(
+            Task.run_id == run.id,
+            Task.kind == kind,
+            Task.area_id == Area.id,
+            Area.dataset_id == run.dataset_id,
+            Area.external_id == area_id,
+            Task.opened_frame_id == Frame.id,
+            Frame.filename == opened_filename,
+        )
+        .values(done_at=func.coalesce(Task.done_at, func.now()))
+        .returning(Task.id)
+    )
+    return task_id is not None
