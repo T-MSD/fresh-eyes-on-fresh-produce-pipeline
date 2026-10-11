@@ -10,7 +10,7 @@ Per product (out/product_groups.json):
           a purchase would not empty the tray). Products OWL has no noun for keep the current level.
 planogram_compliant is copied unchanged from out/final_predictions.before_hybrid.json. Nothing existing is overwritten.
 
-    python src/purchase_rule_predictions.py
+    uv run --extra ml --env-file .env python -m src.purchase_rule_predictions
 """
 
 import json
@@ -20,7 +20,8 @@ import numpy as np
 import typer
 from sklearn.linear_model import Ridge
 
-from train_classifier import standardise
+from src.prediction_io import merge_fallbacks
+from src.train_classifier import standardise
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
@@ -54,7 +55,7 @@ def main(alpha: float = 300.0) -> None:
     )
     typer.echo(f"fill model trained on {len(train)} percentage labels")
 
-    result: dict = {}
+    result: dict = json.loads(json.dumps(base))
     stats = {"fill": [0, 0], "count": [0, 0], "count_no_owl": 0}  # [crops, changed vs current]
     for it in items:
         cam, img, area = it["camera"], it["image"], it["area_id"]
@@ -80,6 +81,7 @@ def main(alpha: float = 300.0) -> None:
             "stock_level": level,
             "stock_value": VALUE[level],
         }
+    merge_fallbacks(result, OUT / "crops")
     (OUT / "purchase_rule_predictions.json").write_text(json.dumps(result, indent=1))
     typer.echo(f"fill crops {stats['fill'][0]}, changed vs current {stats['fill'][1]}")
     typer.echo(

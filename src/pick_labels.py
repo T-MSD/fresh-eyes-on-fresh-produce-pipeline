@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import typer
 
-from train_classifier import POINTS, features, fit_proba
+from src.train_classifier import POINTS, features, fit_proba
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"

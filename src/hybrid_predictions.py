@@ -5,7 +5,7 @@ fill-product half->full (18 of 22, all judged), fill empty->full (1 of 1) and co
 (4 of 5, all judged). It was wrong on fill empty->half, fill full->half and counted half->empty, so
 those keep the current level. Planogram compliance is copied unchanged.
 
-    python src/hybrid_predictions.py
+    uv run --env-file .env python -m src.hybrid_predictions
 """
 
 import copy
@@ -13,6 +13,8 @@ import json
 from pathlib import Path
 
 import typer
+
+from src.prediction_io import merge_fallbacks
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
@@ -40,6 +42,7 @@ def main() -> None:
         if (groups[it["product_id"]]["method"], before, after) in TAKE:
             out[c][i][a]["stock_level"], out[c][i][a]["stock_value"] = after, VALUE[after]
             taken += 1
+    merge_fallbacks(out, OUT / "crops")
     (OUT / "final_predictions.hybrid.json").write_text(json.dumps(out, indent=1))
     typer.echo(f"{taken} areas changed vs current -> out/final_predictions.hybrid.json")
 

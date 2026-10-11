@@ -10,7 +10,7 @@ For each crop, using the product the planogram expects there:
 Writes out/predictions.json (assignment format), out/prelabels.json (pre-fills the review tool),
 out/clip_zeroshot.json (same, kept as a baseline) and out/clip_embeddings.npz (image embeddings, reusable to train a classifier on manual labels).
 
-    python src/clip_predict.py
+    uv run --extra ml --env-file .env python -m src.clip_predict
 """
 
 import json
@@ -19,6 +19,8 @@ from pathlib import Path
 
 import numpy as np
 import typer
+
+from src.prediction_io import merge_fallbacks
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
@@ -143,6 +145,13 @@ def main(
     reuse: bool = True,
 ) -> None:
     items = json.loads((OUT / "crops" / "index.json").read_text())
+    if not items:
+        predictions: dict = {}
+        merge_fallbacks(predictions, OUT / "crops")
+        (OUT / "predictions.json").write_text(json.dumps(predictions, indent=1))
+        (OUT / "prelabels.json").write_text("{}")
+        (OUT / "clip_zeroshot.json").write_text("{}")
+        return
     classes = [product_class(i["product_name"]) for i in items]
     all_classes = sorted(set(classes))
     typer.echo(f"{len(items)} crops, {len(all_classes)} product classes")
@@ -184,7 +193,7 @@ def main(
         for c in all_classes
     }
 
-    predictions: dict = {}
+    predictions = {}
     pre: dict = {}
     level_probs = np.zeros((len(items), 3))
     for n, (item, cls) in enumerate(zip(items, classes, strict=False)):
@@ -207,6 +216,7 @@ def main(
             "unsure": bool(p_level.max() < 0.6),
         }
 
+    merge_fallbacks(predictions, OUT / "crops")
     (OUT / "predictions.json").write_text(json.dumps(predictions, indent=1))
     (OUT / "prelabels.json").write_text(json.dumps(pre, indent=1))
     np.save(OUT / "clip_level_probs.npy", level_probs)  # extra features for train_classifier.py

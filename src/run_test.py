@@ -10,8 +10,8 @@
      Skipped for products missing from out/product_groups.json.
 planogram_compliant is the zero-shot CLIP flag. Nothing under out/ except out/test/ is written.
 
-    python src/run_test.py --data-dir <folder with planogram.json + camera folders>
-    python src/run_test.py --selftest      # rebuild the CURRENT submission from its own crops and compare
+    uv run --extra ml --env-file .env python -m src.run_test --data-dir <dataset-folder>
+    uv run --extra ml --env-file .env python -m src.run_test --selftest
 """
 
 import json
@@ -20,15 +20,10 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import timm
-import torch
 import typer
-from PIL import Image
-from sklearn.linear_model import Ridge
 
-from clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class, softmax
-from finetune import Net, predict
-from train_classifier import fit_proba
+from src.clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class, softmax
+from src.prediction_io import NetworkCrop, merge_fallbacks
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
@@ -47,6 +42,8 @@ def standardise_with(a: np.ndarray, ref: np.ndarray) -> np.ndarray:
 def clip_zeroshot(items, crops_dir: Path, classes: list[str], topk: int, cached: np.ndarray | None):
     """Image embeddings, level probabilities and the compliance flag, as src/clip_predict.py computes them."""
     import open_clip
+    import torch
+    from PIL import Image
 
     name, pretrained = "ViT-B-16-quickgelu", "openai"
     device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -102,6 +99,41 @@ def clip_zeroshot(items, crops_dir: Path, classes: list[str], topk: int, cached:
     return img, zs, np.array(ok)
 
 
+def blend_network(
+    items: list[NetworkCrop], crops_dir: Path, train_classes: list[str], p_lr: np.ndarray
+) -> np.ndarray:
+    known = [n for n, item in enumerate(items) if product_class(item.product_name) in train_classes]
+    if not known:
+        return p_lr.copy()
+
+    import torch
+    from PIL import Image
+
+    from src.finetune import Net, predict
+
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    model = Net(BACKBONE, len(train_classes), pretrained=False)
+    model.load_state_dict(
+        torch.load(OUT / "finetune" / "model.pt", map_location="cpu", weights_only=True)
+    )
+    model.to(device)
+    imgs = torch.from_numpy(
+        np.stack(
+            [
+                np.asarray(
+                    Image.open(crops_dir / items[n].crop).convert("RGB").resize((SIZE, SIZE))
+                )
+                for n in known
+            ]
+        ).transpose(0, 3, 1, 2)
+    )
+    cls = torch.tensor([train_classes.index(product_class(items[n].product_name)) for n in known])
+    p_known, _ = predict(model, imgs, cls, device)
+    probabilities = p_lr.copy()
+    probabilities[known] = W_NET * p_known + (1 - W_NET) * p_lr[known]
+    return probabilities
+
+
 @app.command()
 def main(
     data_dir: Path | None = typer.Option(
@@ -111,28 +143,43 @@ def main(
         False, help="Rebuild the current submission from its own crops and compare"
     ),
     out_file: Path = TEST / "predictions.json",
+    crops_dir: Path = TEST / "crops",
     topk: int = 5,
 ) -> None:
     if not selftest and data_dir is None:
         raise typer.BadParameter("give --data-dir, or --selftest")
-    train_items = json.loads((OUT / "crops" / "index.json").read_text())
     if selftest:
+        train_items = json.loads((OUT / "crops" / "index.json").read_text())
         items, crops_dir = train_items, OUT / "crops"
     else:
-        crops_dir = TEST / "crops"
         subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "src" / "crop_areas.py"),
+                "-m",
+                "src.crop_areas",
                 "--data-dir",
                 str(data_dir),
                 "--out-dir",
                 str(crops_dir),
             ],
             check=True,
+            cwd=ROOT,
         )
         items = json.loads((crops_dir / "index.json").read_text())
     typer.echo(f"{len(items)} areas to predict")
+    if not items:
+        result: dict = {}
+        merge_fallbacks(result, crops_dir)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(result, indent=1))
+        typer.echo(f"wrote fallbacks to {out_file}")
+        return
+
+    from sklearn.linear_model import Ridge
+
+    from src.train_classifier import fit_proba
+
+    train_items = json.loads((OUT / "crops" / "index.json").read_text())
 
     train_classes = sorted({product_class(i["product_name"]) for i in train_items})
     new_classes = sorted({product_class(i["product_name"]) for i in items})
@@ -155,35 +202,8 @@ def main(
     x_tr, x_new = standardise_with(train_emb, train_emb), standardise_with(emb, train_emb)
     p_lr = fit_proba(x_tr[rows], y, x_new, 3, 0.1)
 
-    # Fine-tuned network, inference only.
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
-    orig = timm.create_model
-    timm.create_model = lambda *a, **k: orig(
-        *a, **{**k, "pretrained": False}
-    )  # weights come from model.pt, no download
-    model = Net(BACKBONE, len(train_classes))
-    timm.create_model = orig
-    model.load_state_dict(torch.load(OUT / "finetune" / "model.pt", map_location="cpu"))
-    model.to(device)
-    known = [n for n, i in enumerate(items) if product_class(i["product_name"]) in train_classes]
-    imgs = torch.from_numpy(
-        np.stack(
-            [
-                np.asarray(
-                    Image.open(crops_dir / items[n]["crop"]).convert("RGB").resize((SIZE, SIZE))
-                )
-                for n in known
-            ]
-        ).transpose(0, 3, 1, 2)
-    )
-    cls = torch.tensor(
-        [train_classes.index(product_class(items[n]["product_name"])) for n in known]
-    )
-    p_known, _ = predict(model, imgs, cls, device)
-    p_net = p_lr.copy()
-    p_net[known] = p_known
-    p = np.where(
-        np.isin(np.arange(len(items)), known)[:, None], W_NET * p_net + (1 - W_NET) * p_lr, p_lr
+    p = blend_network(
+        [NetworkCrop.model_validate(item) for item in items], crops_dir, train_classes, p_lr
     )
     level = (p @ POINTS.T).argmax(1)
 
@@ -208,7 +228,7 @@ def main(
             raised += 1
     typer.echo(f"fill rule raised {raised} areas to full")
 
-    result: dict = {}
+    result = {}
     for n, it in enumerate(items):
         lv = LEVELS[level[n]]
         result.setdefault(it["camera"], {}).setdefault(it["image"], {})[it["area_id"]] = {
@@ -216,6 +236,7 @@ def main(
             "stock_level": lv,
             "stock_value": STOCK_VALUES[lv],
         }
+    merge_fallbacks(result, crops_dir)
     out_file.parent.mkdir(parents=True, exist_ok=True)
     out_file.write_text(json.dumps(result, indent=1))
     counts = {lv: int((level == k).sum()) for k, lv in enumerate(LEVELS)}

@@ -8,11 +8,12 @@ classes) and planogram_compliant.
             labels for the other cameras are regenerated from the training cameras' manual labels
             alone, so no information about the held-out labels leaks in. Scores only the held-out
             MANUAL labels, next to zero-shot CLIP and the current classifier on the same cameras.
-  --final   trains on out/labels_all.json (every camera) and writes out/finetune/predictions.json.
+  --final   regenerates confident labels from out/labels.json and CLIP outputs for every camera,
+            then writes out/finetune/predictions.json and model.pt.
             It does not touch out/predictions.json.
 
-    python src/finetune.py --holdout 6371,6443,6591
-    python src/finetune.py --final
+    uv run --extra ml --env-file .env python -m src.finetune --holdout 6371,6443,6591
+    uv run --extra ml --env-file .env python -m src.finetune --final
 """
 
 import json
@@ -26,8 +27,9 @@ import torch.nn.functional as F
 import typer
 from PIL import Image
 
-from clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class
-from train_classifier import features, fit_proba
+from src.clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class
+from src.prediction_io import merge_fallbacks
+from src.train_classifier import features, fit_proba
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
@@ -38,15 +40,17 @@ STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 app = typer.Typer(add_completion=False)
 
 
-def load_crops(items: list[dict], size: int) -> torch.Tensor:
+def load_crops(
+    items: list[dict], size: int, crops_dir: Path = OUT / "crops", work_dir: Path = WORK
+) -> torch.Tensor:
     """All crops resized (squashed) to size x size, uint8 NCHW, cached on disk."""
-    cache = WORK / f"crops{size}.npy"
+    cache = work_dir / f"crops{size}.npy"
     if cache.exists():
         return torch.from_numpy(np.load(cache))
-    WORK.mkdir(exist_ok=True)
+    work_dir.mkdir(parents=True, exist_ok=True)
     arr = np.stack(
         [
-            np.asarray(Image.open(OUT / "crops" / i["crop"]).convert("RGB").resize((size, size)))
+            np.asarray(Image.open(crops_dir / i["crop"]).convert("RGB").resize((size, size)))
             for i in items
         ]
     ).transpose(0, 3, 1, 2)
@@ -55,9 +59,9 @@ def load_crops(items: list[dict], size: int) -> torch.Tensor:
 
 
 class Net(nn.Module):
-    def __init__(self, backbone: str, n_classes: int):
+    def __init__(self, backbone: str, n_classes: int, pretrained: bool = True):
         super().__init__()
-        self.backbone = timm.create_model(backbone, pretrained=True, num_classes=0)
+        self.backbone = timm.create_model(backbone, pretrained=pretrained, num_classes=0)
         d = self.backbone.num_features
         self.product = nn.Embedding(n_classes, 32)
         self.stock = nn.Sequential(nn.Dropout(0.3), nn.Linear(d + 32, 3))
@@ -130,14 +134,17 @@ def main(
     manual_weight: float = 3.0,
     seed: int = 0,
     ignore: Path | None = None,
+    out_dir: Path = OUT,
+    pretrained: bool = True,
 ) -> None:
     torch.manual_seed(seed)
     np.random.seed(seed)
-    items = json.loads((OUT / "crops" / "index.json").read_text())
-    manual = json.loads((OUT / "labels.json").read_text())
-    zero = json.loads((OUT / "clip_zeroshot.json").read_text())
-    emb = np.load(OUT / "clip_embeddings.npz")["embeddings"]
-    zs_probs = np.load(OUT / "clip_level_probs.npy")
+    work_dir = out_dir / "finetune"
+    items = json.loads((out_dir / "crops" / "index.json").read_text())
+    manual = json.loads((out_dir / "labels.json").read_text())
+    zero = json.loads((out_dir / "clip_zeroshot.json").read_text())
+    emb = np.load(out_dir / "clip_embeddings.npz")["embeddings"]
+    zs_probs = np.load(out_dir / "clip_level_probs.npy")
     # --ignore keys.json: drop these manual labels from TRAINING only (the test still scores them),
     # to measure what a batch of labels added.
     dropped = set(json.loads(ignore.read_text())) if ignore else set()
@@ -146,18 +153,11 @@ def main(
     test_cams = set() if final else set(holdout.split(","))
     train_cams = set(cams) - test_cams
 
-    if final:
-        all_labels = json.loads((OUT / "labels_all.json").read_text())
-        labels = {
-            k: (v["planogram_compliant"], v["stock_level"], v["source"], v["confident"])
-            for k, v in all_labels.items()
-        }
-    else:
-        labels = regenerate_labels(items, manual_train, train_cams, emb, zs_probs, zero)
+    labels = regenerate_labels(items, manual_train, train_cams, emb, zs_probs, zero)
 
     classes = sorted({product_class(i["product_name"]) for i in items})
     cls = torch.tensor([classes.index(product_class(i["product_name"])) for i in items])
-    imgs = load_crops(items, size)
+    imgs = load_crops(items, size, out_dir / "crops", work_dir)
 
     train_idx = [n for n, i in enumerate(items) if i["key"] in labels and labels[i["key"]][3]]
     y_stock = torch.tensor([LEVELS.index(labels[items[n]["key"]][1]) for n in train_idx])
@@ -172,7 +172,7 @@ def main(
     )
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
-    model = Net(backbone, len(classes)).to(device)
+    model = Net(backbone, len(classes), pretrained=pretrained).to(device)
     head = (
         list(model.product.parameters())
         + list(model.stock.parameters())
@@ -212,7 +212,7 @@ def main(
             loss.backward()
             opt.step()
             sched.step()
-            total += float(loss) * len(sel)
+            total += float(loss.detach()) * len(sel)
         msg = f"epoch {epoch + 1}/{epochs} loss {total / len(perm):.3f}"
         if test_idx and (epoch + 1) % 2 == 0:
             p_stock, _ = predict(model, imgs[test_idx], cls[test_idx], device)
@@ -223,7 +223,7 @@ def main(
         typer.echo(msg)
 
     if final:
-        WORK.mkdir(exist_ok=True)
+        work_dir.mkdir(exist_ok=True)
         p_stock, p_ok = predict(model, imgs, cls, device)
         level = (p_stock @ POINTS.T).argmax(1)
         predictions: dict = {}
@@ -236,10 +236,11 @@ def main(
                 "stock_level": lv,
                 "stock_value": STOCK_VALUES[lv],
             }
-        (WORK / "predictions.json").write_text(json.dumps(predictions, indent=1))
-        np.save(WORK / "stock_probs.npy", p_stock)
-        np.save(WORK / "ok_probs.npy", p_ok)
-        torch.save(model.state_dict(), WORK / "model.pt")
+        merge_fallbacks(predictions, out_dir / "crops")
+        (work_dir / "predictions.json").write_text(json.dumps(predictions, indent=1))
+        np.save(work_dir / "stock_probs.npy", p_stock)
+        np.save(work_dir / "ok_probs.npy", p_ok)
+        torch.save(model.state_dict(), work_dir / "model.pt")
         typer.echo(
             f"wrote out/finetune/predictions.json for {len(items)} areas (out/predictions.json untouched)"
         )

@@ -4,8 +4,8 @@ Compares it with the zero-shot baseline using the assignment's scoring, on camer
 was not trained on (so near-identical frames of the same shelf cannot leak into the test).
 Only if it scores higher does it overwrite out/predictions.json and out/prelabels.json.
 
-    python src/train_classifier.py
-    python src/train_classifier.py --force      # write predictions even if it does not win
+    uv run --extra ml --env-file .env python -m src.train_classifier
+    uv run --extra ml --env-file .env python -m src.train_classifier --force
 """
 
 import json
@@ -16,7 +16,8 @@ import typer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GroupKFold
 
-from clip_predict import LEVELS, POINTS, STOCK_VALUES
+from src.clip_predict import LEVELS, POINTS, STOCK_VALUES
+from src.prediction_io import merge_fallbacks
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
@@ -176,6 +177,7 @@ def main(force: bool = False) -> None:
             "stock_level": level,
             "unsure": bool(p_level[n].max() < 0.6),
         }
+    merge_fallbacks(predictions, OUT / "crops")
     (OUT / "predictions.json").write_text(json.dumps(predictions, indent=1))
     (OUT / "prelabels.json").write_text(json.dumps(pre, indent=1))
     typer.echo(f"wrote out/predictions.json and out/prelabels.json for {len(items)} areas")
