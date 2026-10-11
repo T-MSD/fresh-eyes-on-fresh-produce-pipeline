@@ -294,6 +294,56 @@ class StorePredictions:
     cameras: list[StoreCamera]
 
 
+@dataclass(frozen=True)
+class PlanogramArea:
+    area_id: str
+    number: int
+    product_id: str
+    product_name: str
+    top_left: list[int]
+    top_right: list[int]
+    bottom_right: list[int]
+    bottom_left: list[int]
+
+
+@dataclass(frozen=True)
+class PlanogramCamera:
+    camera: str
+    camera_name: str | None
+    areas: list[PlanogramArea]
+
+
+def get_cameras(connection: Connection, run: SelectedRun) -> list[PlanogramCamera]:
+    """Every camera of the run's dataset by camera id, each with its areas by area number."""
+    areas: dict[int, list[PlanogramArea]] = {}
+    for row in connection.execute(
+        select(
+            Area.camera_id,
+            Area.external_id,
+            Area.number,
+            Product.external_id,
+            Product.name,
+            Area.top_left,
+            Area.top_right,
+            Area.bottom_right,
+            Area.bottom_left,
+        )
+        .join(Product, Product.id == Area.product_id)
+        .where(Area.dataset_id == run.dataset_id)
+        .order_by(Area.number, Area.external_id)
+    ):
+        areas.setdefault(row[0], []).append(PlanogramArea(*row[1:]))
+    cameras = connection.execute(
+        select(Camera.id, Camera.external_id, Camera.name)
+        .where(Camera.dataset_id == run.dataset_id)
+        .order_by(Camera.external_id)
+    )
+    return [
+        PlanogramCamera(camera=external_id, camera_name=name, areas=areas.get(camera_id, []))
+        for camera_id, external_id, name in cameras
+    ]
+
+
 def has_camera(connection: Connection, run: SelectedRun, camera: str) -> bool:
     return (
         connection.scalar(

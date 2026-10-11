@@ -24,6 +24,24 @@ class PredictionResponse(BaseModel):
         return STOCK_VALUES[self.stock_level]
 
 
+class CameraAreaResponse(BaseModel):
+    area_id: str
+    number: int
+    product_id: str
+    product_name: str
+    corners: CornersResponse
+
+
+class CameraResponse(BaseModel):
+    camera: str
+    camera_name: str | None
+    areas: list[CameraAreaResponse]
+
+
+class CamerasResponse(BaseModel):
+    cameras: list[CameraResponse]
+
+
 class FrameAreaResponse(BaseModel):
     area_id: str
     number: int

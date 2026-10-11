@@ -5,10 +5,13 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import AwareDatetime
 
-from config.db.queries import get_area_stock, get_camera_frame, get_camera_frame_areas
+from config.db.queries import get_area_stock, get_camera_frame, get_camera_frame_areas, get_cameras
 from src.api.dependencies import CompletedRun, DatabaseConnection, RequestedFrame
 from src.api.models import (
     AreaStockResponse,
+    CameraAreaResponse,
+    CameraResponse,
+    CamerasResponse,
     CornersResponse,
     FrameAreaResponse,
     FrameResponse,
@@ -16,6 +19,34 @@ from src.api.models import (
 )
 
 router = APIRouter(tags=["frames"])
+
+
+@router.get("/cameras", responses={404: {"description": "No completed runs available"}})
+def cameras(connection: DatabaseConnection, run: CompletedRun) -> CamerasResponse:
+    return CamerasResponse(
+        cameras=[
+            CameraResponse(
+                camera=camera.camera,
+                camera_name=camera.camera_name,
+                areas=[
+                    CameraAreaResponse(
+                        area_id=area.area_id,
+                        number=area.number,
+                        product_id=area.product_id,
+                        product_name=area.product_name,
+                        corners=CornersResponse(
+                            top_left=area.top_left,
+                            top_right=area.top_right,
+                            bottom_right=area.bottom_right,
+                            bottom_left=area.bottom_left,
+                        ),
+                    )
+                    for area in camera.areas
+                ],
+            )
+            for camera in get_cameras(connection, run)
+        ]
+    )
 
 
 @router.get(
