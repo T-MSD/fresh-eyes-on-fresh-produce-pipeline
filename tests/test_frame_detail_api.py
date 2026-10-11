@@ -1,9 +1,8 @@
-from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection, update
+from sqlalchemy import update
 
 from config.db.connection import get_connection
 from config.db.schema import Dataset
@@ -18,14 +17,6 @@ from tests.db_builders import (
     add_product,
     add_run,
 )
-
-
-@pytest.fixture
-def client(db: Connection) -> Iterator[TestClient]:
-    app = create_app()
-    app.dependency_overrides[get_connection] = lambda: db
-    with TestClient(app) as client:
-        yield client
 
 
 @pytest.mark.parametrize(
