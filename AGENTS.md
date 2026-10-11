@@ -73,6 +73,14 @@ The rich predictions file for the frontend adds `ts`, `product_id`, `product_nam
 `camera`, `area_id`, `product_id`, `product_name`, `kind` (`restock` / `move_product` / `top_up`),
 `opened` and `closed` (`{filename, ts}`, `closed` is `null` while open).
 
+`POST /tasks/done` takes `{area_id, kind, opened_filename}`, the task's `area_id`, `kind` and
+`opened.filename` from `GET /tasks`, and marks that task of the same run done. It returns `204`
+with no body. Marking a task already done returns `204` and keeps its first done time. No
+completed run returns `404` with `{"detail": "No completed runs available"}`; no such task in
+that run returns `404` with `{"detail": "Task not found in the latest completed run"}`; an
+invalid body or unknown `kind` returns `422`. Writes go through the `Transaction` dependency,
+which commits before the response is sent.
+
 `GET /hour-range` returns `{run_id, start, end}` for frames with predictions in the most recent
 completed (`done`) run. `run_id` identifies the selected run; `start` and `end` are full frame
 timestamps, or both `null` when that run has no predictions. Both endpoints skip `running` and

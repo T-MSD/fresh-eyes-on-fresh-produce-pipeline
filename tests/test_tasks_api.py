@@ -3,10 +3,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Connection, text
+from sqlalchemy import Connection, select, text
 
 from config.db.connection import get_connection
-from src.main import app
+from config.db.schema import Task
+from src.api.dependencies import transaction
+from src.main import app, create_app
 from tests.db_builders import (
     add_area,
     add_frame,
@@ -22,6 +24,7 @@ MORNING, NOON, EVENING = 1751052241, 1751055841, 1751059441
 @pytest.fixture
 def client(db: Connection) -> Iterator[TestClient]:
     app.dependency_overrides[get_connection] = lambda: db
+    app.dependency_overrides[transaction] = lambda: db
     try:
         with TestClient(app) as client:
             yield client
@@ -168,3 +171,139 @@ def test_tasks_tied_on_every_other_key_keep_creation_order(
     tasks = client.get("/tasks").json()["tasks"]
 
     assert [task["opened"]["filename"] for task in tasks] == names
+
+
+def done_body(area_id: str = "6215_1", kind: str = "restock", ts: int = MORNING) -> dict:
+    return {"area_id": area_id, "kind": kind, "opened_filename": f"{ts}.jpg"}
+
+
+def done_at(db: Connection, task_id: int) -> datetime | None:
+    return db.scalar(select(Task.done_at).where(Task.id == task_id))
+
+
+@pytest.mark.parametrize("status", [None, "running", "failed"])
+def test_mark_done_without_completed_run(db: Connection, client: TestClient, dataset: int, status):
+    if status is not None:
+        add_run(db, dataset, status=status)
+
+    response = client.post("/tasks/done", json=done_body())
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "No completed runs available"}
+
+
+def test_marks_the_task_done(db: Connection, client: TestClient, dataset: int, camera: int):
+    run_id, area_id = add_run(db, dataset, status="done"), add_area(db, camera, 1)
+    task_id = add_task(db, run_id, area_id, add_predicted_frame(db, run_id, area_id, camera))
+
+    response = client.post("/tasks/done", json=done_body())
+
+    assert response.status_code == 204
+    assert response.content == b""
+    assert done_at(db, task_id) is not None
+    assert client.get("/tasks").json() == {"tasks": []}
+
+
+def test_marking_a_done_task_again_keeps_its_first_done_time(
+    db: Connection, client: TestClient, dataset: int, camera: int
+):
+    run_id, area_id = add_run(db, dataset, status="done"), add_area(db, camera, 1)
+    first = datetime(2026, 1, 1, tzinfo=UTC)
+    task_id = add_task(
+        db, run_id, area_id, add_predicted_frame(db, run_id, area_id, camera), done_at=first
+    )
+
+    response = client.post("/tasks/done", json=done_body())
+
+    assert response.status_code == 204
+    assert done_at(db, task_id) == first
+
+
+def test_marks_only_the_identified_task(
+    db: Connection, client: TestClient, dataset: int, camera: int
+):
+    run_id = add_run(db, dataset, status="done")
+    first, second = add_area(db, camera, 1), add_area(db, camera, 2)
+    morning, noon = add_frame(db, camera, MORNING), add_frame(db, camera, NOON)
+    for area_id in (first, second):
+        for frame_id in (morning, noon):
+            add_prediction(db, run_id, frame_id, area_id, camera)
+    target = add_task(db, run_id, first, morning, closed_frame_id=noon)
+    others = [
+        add_task(db, run_id, first, morning, kind="top_up", closed_frame_id=noon),
+        add_task(db, run_id, first, noon),
+        add_task(db, run_id, second, morning),
+    ]
+
+    response = client.post("/tasks/done", json=done_body())
+
+    assert response.status_code == 204
+    assert done_at(db, target) is not None
+    assert [done_at(db, task_id) for task_id in others] == [None, None, None]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        done_body(area_id="6215_9"),
+        done_body(area_id="9999_1"),
+        done_body(kind="top_up"),
+        done_body(ts=NOON),
+    ],
+)
+def test_unknown_task_is_not_found(
+    db: Connection, client: TestClient, dataset: int, camera: int, body: dict
+):
+    run_id, area_id = add_run(db, dataset, status="done"), add_area(db, camera, 1)
+    add_frame(db, camera, NOON)
+    task_id = add_task(db, run_id, area_id, add_predicted_frame(db, run_id, area_id, camera))
+
+    response = client.post("/tasks/done", json=body)
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Task not found in the latest completed run"}
+    assert done_at(db, task_id) is None
+
+
+def test_task_of_an_older_run_is_not_found(
+    db: Connection, client: TestClient, dataset: int, camera: int
+):
+    area_id, frame_id = add_area(db, camera, 1), add_frame(db, camera)
+    started_at = datetime(2026, 1, 2, tzinfo=UTC)
+    older = add_run(db, dataset, started_at=started_at - timedelta(days=1), status="done")
+    add_prediction(db, older, frame_id, area_id, camera)
+    task_id = add_task(db, older, area_id, frame_id)
+    add_run(db, dataset, started_at=started_at, status="done")
+
+    response = client.post("/tasks/done", json=done_body())
+
+    assert response.status_code == 404
+    assert done_at(db, task_id) is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        done_body(kind="sweep"),
+        {"area_id": "6215_1", "kind": "restock"},
+        {"kind": "restock", "opened_filename": f"{MORNING}.jpg"},
+    ],
+)
+def test_invalid_mark_done_body_is_rejected(client: TestClient, body: dict):
+    assert client.post("/tasks/done", json=body).status_code == 422
+
+
+def test_frontend_origin_can_mark_tasks_done(monkeypatch):
+    monkeypatch.setenv("CORS_ORIGINS", "http://localhost:5173")
+    with TestClient(create_app()) as client:
+        response = client.options(
+            "/tasks/done",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type",
+            },
+        )
+
+    assert response.status_code == 200
+    assert "POST" in response.headers["access-control-allow-methods"]

@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Annotated
 
 from fastapi import Depends, HTTPException
@@ -7,6 +8,15 @@ from config.db.connection import get_connection
 from config.db.queries import SelectedRun, StoredFrame, get_latest_run, get_stored_frame
 
 DatabaseConnection = Annotated[Connection, Depends(get_connection)]
+
+
+def transaction(connection: DatabaseConnection) -> Iterator[Connection]:
+    """A connection whose writes commit before the response is sent, or roll back on error."""
+    with connection.begin():
+        yield connection
+
+
+Transaction = Annotated[Connection, Depends(transaction, scope="function")]
 
 
 def completed_run(connection: DatabaseConnection) -> SelectedRun:
