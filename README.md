@@ -149,6 +149,29 @@ still open at any moment; `closed` is `null` while a task is open. With no compl
 the endpoint returns `404` with `{"detail": "No completed runs available"}`. Interactive API
 documentation is at `/docs`.
 
+`GET /cameras/{camera}/frames/{filename}/areas` returns the frame's planogram areas and
+their predictions from the most recent completed run:
+
+```text
+GET /cameras/6215/frames/1751052241.jpg/areas
+  → run_id, camera_id, filename, ts, areas[]
+  → area_id, number, product_id, product_name, corner coordinates, prediction
+```
+
+The camera is its external id, resolved within the selected run's dataset. The frame is
+identified by that camera and its filename; generated frame ids stay inside the database.
+Areas are ordered by their planogram number. Each prediction includes compliance, stock
+level and its derived stock value, external detected product id, confidence estimates,
+and `is_fallback`. An area without a prediction in the selected run has `prediction: null`;
+older predictions never fill gaps. Missing confidence estimates stay `null` and corner
+coordinates retain negative values. `ts` is a full frame timestamp in UTC (`Z`).
+
+With no completed runs, the endpoint returns `404` with
+`{"detail": "No completed runs available"}`. Unknown cameras and frames in the selected
+run's dataset return `404` with `Camera not found` and `Frame not found`, respectively.
+A frame whose camera has no areas returns an empty `areas` list. The API reads stored
+records and does not need to open the frame image.
+
 ## Layout
 
 ```

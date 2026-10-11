@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import AwareDatetime
 
-from config.db.queries import get_area_stock, get_camera_frame, get_frame_areas
+from config.db.queries import get_area_stock, get_camera_frame, get_camera_frame_areas
 from src.api.dependencies import CompletedRun, DatabaseConnection, RequestedFrame
 from src.api.models import (
     AreaStockResponse,
@@ -31,7 +31,7 @@ def get_frame(
     if frame is None:
         raise HTTPException(status_code=404, detail="Frame not found in the latest completed run")
     areas = []
-    for row in get_frame_areas(connection, run, frame):
+    for row in get_camera_frame_areas(connection, run, frame):
         prediction = None
         if row.prediction is not None:
             prediction = PredictionResponse.model_validate(row.prediction, from_attributes=True)
