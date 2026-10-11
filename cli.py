@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from typing import Annotated, NoReturn
 
@@ -5,6 +6,7 @@ import typer
 
 from config.db.connection import make_engine
 from config.db.load import load_dataset
+from config.db.save_run import UnusableRun, latest_dataset_id, save_run
 from ingest.dataset import Dataset, read_dataset
 from ingest.errors import InvalidInput
 
@@ -72,6 +74,35 @@ def load(
     finally:
         engine.dispose()
     typer.echo(f"loaded at {report.loaded_at.isoformat()}")
+
+
+@app.command("save-run")
+def save_run_command(
+    predictions: Annotated[
+        Path,
+        typer.Argument(
+            exists=True, dir_okay=False, readable=True, help="Submission-shaped predictions JSON."
+        ),
+    ],
+    method: Annotated[str, typer.Option(help="Name stored with the run.")] = "file",
+    dataset_id: Annotated[
+        int | None, typer.Option(help="Dataset load to attach to; default is the newest.")
+    ] = None,
+) -> None:
+    """Store a predictions file as a run on a loaded dataset."""
+    raw = json.loads(predictions.read_text())
+    engine = make_engine()
+    try:
+        with engine.begin() as conn:
+            target = dataset_id if dataset_id is not None else latest_dataset_id(conn)
+            run_id = save_run(
+                conn, target, raw, method=method, params={"predictions": str(predictions)}
+            )
+    except UnusableRun as error:
+        fail(error.problems)
+    finally:
+        engine.dispose()
+    typer.echo(f"stored run {run_id} on dataset {target}")
 
 
 def print_dataset(dataset: Dataset) -> None:
