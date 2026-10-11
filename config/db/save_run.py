@@ -1,12 +1,13 @@
 import subprocess
 from collections.abc import Collection
+from itertools import groupby
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, TypeAdapter
 from sqlalchemy import Connection, func, insert, select
 
-from config.db.schema import Area, Camera, Frame, Prediction, Run, StockLevel
+from config.db.schema import Area, Camera, Frame, Prediction, Run, StockLevel, Task, TaskKind
 from config.db.schema import Dataset as DatasetLoad
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -141,4 +142,63 @@ def save_run(
                 for key, row in rows.items()
             ],
         )
+        derive_tasks(conn, run_id)
     return run_id
+
+
+def task_kind(stock_level: StockLevel, planogram_compliant: bool) -> TaskKind | None:
+    if stock_level == "empty":
+        return "restock"
+    if not planogram_compliant:
+        return "move_product"
+    if stock_level == "half":
+        return "top_up"
+    return None
+
+
+def derive_tasks(conn: Connection, run_id: int) -> int:
+    """Store the tasks of a run without any, from its predictions; returns how many.
+
+    Each area's frames are walked in time order. A task opens on the frame where its problem
+    appears and closes on the first later frame showing a different problem or none; a different
+    problem opens its own task on that frame. Fallback predictions neither open nor close a task.
+    """
+    if conn.scalar(select(Run.id).where(Run.id == run_id)) is None:
+        raise UnusableRun([f"run {run_id} does not exist"])
+    if conn.scalar(select(Task.id).where(Task.run_id == run_id).limit(1)) is not None:
+        raise UnusableRun([f"run {run_id} already has tasks"])
+
+    rows = conn.execute(
+        select(
+            Prediction.area_id,
+            Prediction.frame_id,
+            Prediction.stock_level,
+            Prediction.planogram_compliant,
+        )
+        .join(Frame, Frame.id == Prediction.frame_id)
+        .where(Prediction.run_id == run_id, Prediction.is_fallback.is_(False))
+        .order_by(Prediction.area_id, Frame.ts, Frame.filename)
+    ).all()
+
+    tasks: list[dict[str, Any]] = []
+    for area_id, frames in groupby(rows, key=lambda row: row.area_id):
+        current: dict[str, Any] | None = None
+        for row in frames:
+            kind = task_kind(row.stock_level, row.planogram_compliant)
+            if current is not None and current["kind"] == kind:
+                continue
+            if current is not None:
+                current["closed_frame_id"] = row.frame_id
+            current = None
+            if kind is not None:
+                current = {
+                    "run_id": run_id,
+                    "area_id": area_id,
+                    "kind": kind,
+                    "opened_frame_id": row.frame_id,
+                    "closed_frame_id": None,
+                }
+                tasks.append(current)
+    if tasks:
+        conn.execute(insert(Task), tasks)
+    return len(tasks)

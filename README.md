@@ -114,6 +114,13 @@ frames) are stored with `is_fallback` set: `run_test --db` does this itself, `sa
 `--fallbacks <file>`. Confidences stay `NULL`: these methods give no estimate. Score columns stay
 `NULL` until there are dev labels to score against.
 
+The same transaction stores the run's tasks. Each area's frames are walked in time order; an
+area's problem is `empty` (`restock`), else not compliant (`move_product`), else `half`
+(`top_up`). A task opens on the frame where its problem appears and closes on the first later
+frame with a different problem or none, where that different problem opens its own task.
+Fallback predictions neither open nor close a task. `cli.py derive-tasks <run_id>` stores the
+tasks of a run saved before this; it refuses a run that already has tasks.
+
 ## API
 
 ```bash
