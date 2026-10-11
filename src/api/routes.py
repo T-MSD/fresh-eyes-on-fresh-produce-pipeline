@@ -26,7 +26,7 @@ def get_prediction_frame(
     return FrameResponse(
         run_id=run_id,
         id=frame.id,
-        camera_id=frame.camera_id,
+        camera_id=frame.camera.external_id,
         filename=frame.filename,
         ts=frame.ts,
         width=frame.width,

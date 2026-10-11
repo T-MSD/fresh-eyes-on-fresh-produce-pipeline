@@ -5,7 +5,9 @@ from fastapi import FastAPI
 from sqlalchemy import Connection, Engine
 
 from config.db.connection import make_engine
+from src.api.hour_range import router as hour_range_router
 from src.api.routes import router
+from src.api.tasks import router as tasks_router
 
 
 def create_app(bind: Engine | Connection | None = None) -> FastAPI:
@@ -20,6 +22,8 @@ def create_app(bind: Engine | Connection | None = None) -> FastAPI:
 
     app = FastAPI(title="Fresh Eyes API", lifespan=lifespan)
     app.include_router(router)
+    app.include_router(hour_range_router)
+    app.include_router(tasks_router)
     return app
 
 
