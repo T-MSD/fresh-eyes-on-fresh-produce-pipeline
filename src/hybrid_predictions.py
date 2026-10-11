@@ -5,7 +5,7 @@ fill-product half->full (18 of 22, all judged), fill empty->full (1 of 1) and co
 (4 of 5, all judged). It was wrong on fill empty->half, fill full->half and counted half->empty, so
 those keep the current level. Planogram compliance is copied unchanged.
 
-    python src/hybrid_predictions.py
+    uv run --env-file .env python -m src.hybrid_predictions
 """
 
 import copy

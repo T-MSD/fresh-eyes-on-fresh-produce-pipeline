@@ -9,7 +9,7 @@
 Areas that run off the edge of the image are skipped, because labelling them needs a rule
 that has not been agreed.
 
-    python src/pick_labels.py --informative 40 --random 10
+    uv run --env-file .env python -m src.pick_labels --informative 40 --random 10
 """
 
 import json
@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 import typer
 
-from train_classifier import POINTS, features, fit_proba
+from src.train_classifier import POINTS, features, fit_proba
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"

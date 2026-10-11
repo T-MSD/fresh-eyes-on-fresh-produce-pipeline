@@ -1,7 +1,7 @@
 """Keyboard-driven labelling tool for the planogram-area crops made by crop_areas.py.
 
-    python src/review_tool.py serve        # http://127.0.0.1:8000
-    python src/review_tool.py export       # out/annotations.json in the official format
+    uv run --env-file .env python -m src.review_tool serve        # http://127.0.0.1:8000
+    uv run --env-file .env python -m src.review_tool export       # out/annotations.json in the official format
 
 Labels are saved to out/labels.json after every keypress. Suggestions from a model can be put
 in out/prelabels.json (same shape as labels.json; src/prelabel.py makes it from Vision); they are shown pre-filled and accepted
@@ -198,7 +198,9 @@ def serve(port: int = 8000, host: str = "127.0.0.1", relabel: bool = False) -> N
     global LABELS, PRELABELS, PAGE
     index = CROPS / "index.json"
     if not index.exists():
-        raise typer.BadParameter("out/crops/index.json missing - run src/crop_areas.py first")
+        raise typer.BadParameter(
+            "out/crops/index.json missing - run python -m src.crop_areas first"
+        )
     items = json.loads(index.read_text())
     if relabel:
         queue = json.loads((OUT / "relabel_queue.json").read_text())

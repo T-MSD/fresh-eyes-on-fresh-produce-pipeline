@@ -19,6 +19,7 @@ torchvision==0.29.1
 transformers==5.19.0
 open-clip-torch==3.3.0
 scikit-learn==1.9.1
+google-cloud-vision==3.16.0
 
 # Dev
 pytest==9.1.1

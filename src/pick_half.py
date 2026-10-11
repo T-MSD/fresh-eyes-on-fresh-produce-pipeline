@@ -6,7 +6,7 @@ pick_labels.py: one per area, few per camera (1 for cameras already well labelle
 and none of the areas that run off the image edge. The queue is marked blind, so the app hides the
 model's suggestion and the labels are your own judgement.
 
-    python src/pick_half.py --n 40
+    uv run --env-file .env python -m src.pick_half --n 40
 """
 
 import json

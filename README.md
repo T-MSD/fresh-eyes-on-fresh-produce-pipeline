@@ -5,20 +5,13 @@ Sensei challenge, JunctionX Lisbon 2026. For every camera image and every planog
 
 ## Setup
 
-With uv:
-
 ```bash
 brew install uv
 uv sync                 # core: pipeline + API
-uv sync --extra ml      # adds torch, transformers, open_clip
+uv sync --extra ml      # adds torch, transformers, open_clip, google-cloud-vision
 ```
 
-With pip:
-
-```bash
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-```
+Run every script as a module through uv, from the repo root: `uv run --env-file .env python -m src.<script>`.
 
 ## Database
 
@@ -98,6 +91,24 @@ does not decode to the size it declares. EXIF rotation may swap width and height
 is the decoded one, the image the planogram corners refer to. Unreadable images are listed and
 stored without a size, so their areas still get a fallback.
 
+## Storing a run
+
+A run is one set of predictions on one dataset load. `run_test --db` stores its output as a run
+(`method` `run_test`, params and git SHA recorded) next to writing `out/test/predictions.json`;
+`cli.py save-run` stores any submission-shaped file.
+
+```bash
+uv run --env-file .env python cli.py load <planogram> <images_dir>      # first: the dataset
+uv run --env-file .env python -m src.run_test --data-dir <folder> --db  # newest load, or --dataset-id N
+uv run --env-file .env python cli.py save-run out/final_predictions.json --method hybrid
+```
+
+The run is stored in one transaction and only if it covers every area of every frame of the
+dataset; a missing area, or a frame or area the dataset does not have, stops it with the list and
+stores nothing (the JSON file is still written). Areas on unreadable frames are stored with
+`is_fallback` set. Confidences stay `NULL`: these methods give no estimate. Score columns stay
+`NULL` until there are dev labels to score against.
+
 ## Layout
 
 ```
@@ -137,12 +148,12 @@ Everything runs from `src/`, in this order:
 
 | Step | Command | Output |
 | --- | --- | --- |
-| crop every planogram area | `python src/crop_areas.py` | `out/crops/` |
-| Google Vision labels (hint only) | `python src/label_images.py` | `out/vision_labels.json` |
-| CLIP zero-shot predictions | `python src/clip_predict.py --topk 5` | `out/clip_zeroshot.json`, `clip_embeddings.npz` |
-| hand-label in the browser | `python src/review_tool.py serve` | `out/labels.json` |
-| classifier on CLIP embeddings | `python src/train_classifier.py` | `out/predictions.json` |
-| fine-tuned network (all labels) | `python src/finetune.py --final` | `out/finetune/` (`model.pt` is not tracked) |
+| crop every planogram area | `uv run --env-file .env python -m src.crop_areas` | `out/crops/` |
+| Google Vision labels (hint only) | `uv run --env-file .env python -m src.label_images` | `out/vision_labels.json` |
+| CLIP zero-shot predictions | `uv run --env-file .env python -m src.clip_predict --topk 5` | `out/clip_zeroshot.json`, `clip_embeddings.npz` |
+| hand-label in the browser | `uv run --env-file .env python -m src.review_tool serve` | `out/labels.json` |
+| classifier on CLIP embeddings | `uv run --env-file .env python -m src.train_classifier` | `out/predictions.json` |
+| fine-tuned network (all labels) | `uv run --env-file .env python -m src.finetune --final` | `out/finetune/` (`model.pt` and `bundle.joblib` are not tracked) |
 
 `finetune.py` without `--final` holds out 3 cameras and scores the hand labels only. Latest run:
 +0.49 stock points per area, 85% exact level, 15 of 19 halves found, identification +0.96 (3 cameras,
@@ -154,13 +165,13 @@ for scoring.
 
 | Step | Command | Output |
 | --- | --- | --- |
-| group every product by purchase size and method (count or fill) | `python src/product_groups.py` | `out/product_groups.json` |
-| count loose items with OWL-ViT v2 | `python src/owl_count.py` | `out/owl_counts.json` |
-| label fill percentages in the browser | `python src/fill_label_page.py` | `out/check/fill_labelling.html` -> `out/fill_labels.json` |
-| compare cutoff rules on held-out cameras | `python src/fill_probe.py` | printed table |
-| build strategy B predictions | `python src/purchase_rule_predictions.py` | `out/purchase_rule_predictions.json` |
-| judge where A and B disagree | `python src/compare_strategies.py`, then `--score` | `out/check/compare_strategies.html` |
-| keep only the changes judged right | `python src/hybrid_predictions.py` | `out/final_predictions.hybrid.json` |
+| group every product by purchase size and method (count or fill) | `uv run --env-file .env python -m src.product_groups` | `out/product_groups.json` |
+| count loose items with OWL-ViT v2 | `uv run --env-file .env python -m src.owl_count` | `out/owl_counts.json` |
+| label fill percentages in the browser | `uv run --env-file .env python -m src.fill_label_page` | `out/check/fill_labelling.html` -> `out/fill_labels.json` |
+| compare cutoff rules on held-out cameras | `uv run --env-file .env python -m src.fill_probe` | printed table |
+| build strategy B predictions | `uv run --env-file .env python -m src.purchase_rule_predictions` | `out/purchase_rule_predictions.json` |
+| judge where A and B disagree | `uv run --env-file .env python -m src.compare_strategies`, then `--score` | `out/check/compare_strategies.html` |
+| keep only the changes judged right | `uv run --env-file .env python -m src.hybrid_predictions` | `out/final_predictions.hybrid.json` |
 
 What strategy B does:
 - `product_groups.py` puts each product in a group with a typical purchase and an "empty means N units
@@ -196,16 +207,32 @@ On 100 crops where A and B disagreed, judged by hand under the purchase rule (3 
 ### Run on new images
 
 ```bash
-python src/run_test.py --data-dir <folder with planogram.json and the camera folders>
+uv sync --extra ml
+uv run --env-file .env python -m src.run_test --data-dir <folder with planogram.json and the camera folders>
 ```
 
 It crops the new frames, runs CLIP, the saved network and the classifier, blends them, applies the
 one fill rule that survived (a blend "empty/half" becomes "full" when the fill model says >= 65%) and
-writes `out/test/predictions.json`. No training, about 20 seconds for 1,962 areas. It needs
-`out/finetune/model.pt` (`python src/finetune.py --final`), `out/labels.json`, `out/fill_labels.json`
-and `out/product_groups.json`. `python src/run_test.py --selftest` rebuilds the submission from its
-own crops; it differs from `out/final_predictions.json` on 5 areas, the OWL count changes that
-`run_test.py` leaves out on purpose. A product class the network has not seen is scored by the
+writes `out/test/predictions.json`. No training, about 20 seconds for 1,962 areas. A frame OpenCV
+cannot read has no crops, so its areas get a fallback instead of being dropped: compliant, and the
+stock level with the best expected points under the hand-label mix.
+
+It reads only three files, so those are all you need to share:
+
+```
+uv run --env-file .env python -m src.finetune --final   # writes out/finetune/
+  model.pt          network weights
+  bundle.joblib     class order of the network head, CLIP standardisation, classifier, fill model
+out/product_groups.json
+```
+
+`model.pt` is only valid with the bundle written next to it. `python -m src.finetune --bundle-only`
+rebuilds the bundle from `out/crops/index.json`, `out/labels.json` and `out/fill_labels.json` without
+training, which is only correct while those still match the run that produced `model.pt`.
+
+`uv run --env-file .env python -m src.run_test --selftest` rebuilds the submission from its own
+crops; it differs from `out/final_predictions.json` on 5 areas, the OWL count changes that
+`run_test` leaves out on purpose. A product class the network has not seen is scored by the
 classifier alone and logged as a warning.
 
 Tracked files under `out/`: `labels.json`, `fill_labels.json`, `product_groups.json`,

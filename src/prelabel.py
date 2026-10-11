@@ -9,7 +9,7 @@ Vision says what is in a crop, not how full the shelf is, so this is a baseline:
 no produce-like label is found, otherwise "half" (the cheapest hedge under the scoring), and
 always compliant (about 93% of validation areas are).
 
-    python src/prelabel.py
+    uv run --env-file .env python -m src.prelabel
 """
 
 import json

@@ -10,7 +10,7 @@ Per product (out/product_groups.json):
           a purchase would not empty the tray). Products OWL has no noun for keep the current level.
 planogram_compliant is copied unchanged from out/final_predictions.before_hybrid.json. Nothing existing is overwritten.
 
-    python src/purchase_rule_predictions.py
+    uv run --env-file .env python -m src.purchase_rule_predictions
 """
 
 import json
@@ -20,7 +20,7 @@ import numpy as np
 import typer
 from sklearn.linear_model import Ridge
 
-from train_classifier import standardise
+from src.train_classifier import standardise
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"

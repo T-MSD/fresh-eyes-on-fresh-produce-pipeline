@@ -10,7 +10,7 @@ For each crop, using the product the planogram expects there:
 Writes out/predictions.json (assignment format), out/prelabels.json (pre-fills the review tool),
 out/clip_zeroshot.json (same, kept as a baseline) and out/clip_embeddings.npz (image embeddings, reusable to train a classifier on manual labels).
 
-    python src/clip_predict.py
+    uv run --env-file .env python -m src.clip_predict
 """
 
 import json

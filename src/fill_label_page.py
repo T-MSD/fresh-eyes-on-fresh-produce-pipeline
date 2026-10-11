@@ -3,8 +3,8 @@
 Uses the already-labelled crops of every product the table marks method "fill", spread across products.
 The page keeps answers in the browser and exports out/fill_labels.json-style JSON {key: {fill, wrong, unsure}}.
 
-    python src/fill_label_page.py [--n 150]
-    python src/fill_label_page.py --extra --n 60   # products moved to fill later -> fill_labelling_2.html
+    uv run --env-file .env python -m src.fill_label_page [--n 150]
+    uv run --env-file .env python -m src.fill_label_page --extra --n 60   # products moved to fill later -> fill_labelling_2.html
 """
 
 import base64

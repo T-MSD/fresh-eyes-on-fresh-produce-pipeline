@@ -4,8 +4,8 @@ Compares it with the zero-shot baseline using the assignment's scoring, on camer
 was not trained on (so near-identical frames of the same shelf cannot leak into the test).
 Only if it scores higher does it overwrite out/predictions.json and out/prelabels.json.
 
-    python src/train_classifier.py
-    python src/train_classifier.py --force      # write predictions even if it does not win
+    uv run --env-file .env python -m src.train_classifier
+    uv run --env-file .env python -m src.train_classifier --force      # write predictions even if it does not win
 """
 
 import json
@@ -16,7 +16,7 @@ import typer
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GroupKFold
 
-from clip_predict import LEVELS, POINTS, STOCK_VALUES
+from src.clip_predict import LEVELS, POINTS, STOCK_VALUES
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
@@ -41,12 +41,19 @@ def features(emb: np.ndarray, probs: np.ndarray, with_zeroshot: bool) -> np.ndar
     return np.hstack(parts)
 
 
-def fit_proba(x_tr, y_tr, x_te, n_classes: int, c: float) -> np.ndarray:
+def fit_classifier(x_tr, y_tr, c: float) -> LogisticRegression:
+    return LogisticRegression(C=c, max_iter=2000).fit(x_tr, y_tr)
+
+
+def proba_of(model: LogisticRegression, x, n_classes: int) -> np.ndarray:
     """Class probabilities with one column per class, even if a class is absent from training."""
-    model = LogisticRegression(C=c, max_iter=2000).fit(x_tr, y_tr)
-    proba = np.zeros((len(x_te), n_classes))
-    proba[:, model.classes_] = model.predict_proba(x_te)
+    proba = np.zeros((len(x), n_classes))
+    proba[:, model.classes_] = model.predict_proba(x)
     return proba
+
+
+def fit_proba(x_tr, y_tr, x_te, n_classes: int, c: float) -> np.ndarray:
+    return proba_of(fit_classifier(x_tr, y_tr, c), x_te, n_classes)
 
 
 def pick_levels(p_stock: np.ndarray) -> np.ndarray:
@@ -65,7 +72,7 @@ def score(level_idx, compliant, true_level_idx, true_compliant) -> float:
 def main(force: bool = False) -> None:
     items = json.loads((OUT / "crops" / "index.json").read_text())
     cache = np.load(OUT / "clip_embeddings.npz")
-    assert list(cache["keys"]) == [i["key"] for i in items], "rerun src/clip_predict.py"
+    assert list(cache["keys"]) == [i["key"] for i in items], "rerun python -m src.clip_predict"
     emb_all = cache["embeddings"]
     zs_probs = np.load(OUT / "clip_level_probs.npy")
     zero = json.loads((OUT / "clip_zeroshot.json").read_text())
