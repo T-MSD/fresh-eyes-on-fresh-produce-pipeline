@@ -11,7 +11,6 @@ router = APIRouter()
 
 
 class HourRangeResponse(BaseModel):
-    run_id: int
     start: AwareDatetime | None
     end: AwareDatetime | None
 

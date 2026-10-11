@@ -81,9 +81,9 @@ completed run returns `404` with `{"detail": "No completed runs available"}`; no
 that run returns `404` with `{"detail": "Task not found in the latest completed run"}`; an
 invalid body or unknown `kind` returns `422`.
 
-`GET /hour-range` returns `{run_id, start, end}` for frames with predictions in the most recent
-completed (`done`) run. `run_id` identifies the selected run; `start` and `end` are full frame
-timestamps, or both `null` when that run has no predictions.
+`GET /hour-range` returns `{start, end}` for frames with predictions in the most recent
+completed (`done`) run. `start` and `end` are full frame timestamps, or both `null` when that
+run has no predictions.
 
 A camera's frame at `at` is its newest frame at or before `at` in the latest completed run's
 dataset, with or without predictions in that run; frames tied on time resolve to the highest

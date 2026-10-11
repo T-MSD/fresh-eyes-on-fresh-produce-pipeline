@@ -27,7 +27,6 @@ URGENT: tuple[AreaStatus, ...] = ("empty", "wrong_product", "half", "unknown")
 
 @dataclass(frozen=True)
 class HourRange:
-    run_id: int
     start: datetime | None
     end: datetime | None
 
@@ -252,7 +251,7 @@ def get_area_stock(
 def get_hour_range(connection: Connection) -> HourRange | None:
     run = latest_run()
     statement = (
-        select(run.c.id, func.min(Frame.ts), func.max(Frame.ts))
+        select(func.min(Frame.ts), func.max(Frame.ts))
         .select_from(run)
         .outerjoin(Prediction, Prediction.run_id == run.c.id)
         .outerjoin(Frame, Frame.id == Prediction.frame_id)
@@ -261,7 +260,7 @@ def get_hour_range(connection: Connection) -> HourRange | None:
     row = connection.execute(statement).one_or_none()
     if row is None:
         return None
-    return HourRange(run_id=row[0], start=row[1], end=row[2])
+    return HourRange(start=row[0], end=row[1])
 
 
 @dataclass(frozen=True)
