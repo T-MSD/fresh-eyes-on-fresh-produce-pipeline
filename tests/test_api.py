@@ -28,12 +28,12 @@ def test_empty_completed_run_never_uses_older_predictions(db: Connection, client
     area = add_area(db, camera, 1)
     old = add_run(db, dataset, started_at=datetime(2026, 1, 1, tzinfo=UTC), status="done")
     add_prediction(db, old, add_frame(db, camera), area, camera)
-    latest = add_run(db, dataset, started_at=datetime(2026, 1, 2, tzinfo=UTC), status="done")
+    add_run(db, dataset, started_at=datetime(2026, 1, 2, tzinfo=UTC), status="done")
 
     response = client.get("/hour-range")
 
     assert response.status_code == 200
-    assert response.json() == {"run_id": latest, "start": None, "end": None}
+    assert response.json() == {"start": None, "end": None}
 
 
 @pytest.mark.parametrize("status", ["running", "failed"])
@@ -57,7 +57,6 @@ def test_incomplete_run_does_not_hide_completed_predictions(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["run_id"] == old
     for field in ("start", "end"):
         assert datetime.fromisoformat(payload[field]) == datetime.fromtimestamp(1751052241, UTC)
 
@@ -94,7 +93,6 @@ def test_hour_range_only_includes_latest_run_frames(db: Connection, client: Test
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["run_id"] == latest
     assert datetime.fromisoformat(payload["start"]) == datetime.fromtimestamp(1751052241, UTC)
     assert datetime.fromisoformat(payload["end"]) == datetime.fromtimestamp(1751059441, UTC)
 
@@ -115,17 +113,23 @@ def test_single_frame_and_tied_run_start_times(db: Connection, client: TestClien
     assert response.status_code == 200
     timestamp = datetime.fromtimestamp(1751059441, UTC)
     payload = response.json()
-    assert payload["run_id"] == latest
     assert datetime.fromisoformat(payload["start"]) == timestamp
     assert datetime.fromisoformat(payload["end"]) == timestamp
 
 
 def test_hour_range_reselects_latest_run_on_each_request(db: Connection, client: TestClient):
     dataset = add_dataset(db)
+    add_product(db, dataset)
+    camera = add_camera(db, dataset, "6215")
+    area = add_area(db, camera, 1)
     older = add_run(db, dataset, started_at=datetime(2026, 1, 1, tzinfo=UTC), status="done")
-    assert client.get("/hour-range").json()["run_id"] == older
+    add_prediction(db, older, add_frame(db, camera, 1751052241), area, camera)
+    first = client.get("/hour-range").json()
+    assert datetime.fromisoformat(first["start"]) == datetime.fromtimestamp(1751052241, UTC)
     latest = add_run(db, dataset, started_at=datetime(2026, 1, 2, tzinfo=UTC), status="done")
-    assert client.get("/hour-range").json()["run_id"] == latest
+    add_prediction(db, latest, add_frame(db, camera, 1751059441), area, camera)
+    second = client.get("/hour-range").json()
+    assert datetime.fromisoformat(second["start"]) == datetime.fromtimestamp(1751059441, UTC)
 
 
 def test_new_dataset_load_does_not_replace_latest_run(db: Connection, client: TestClient):
@@ -145,7 +149,6 @@ def test_new_dataset_load_does_not_replace_latest_run(db: Connection, client: Te
     assert response.status_code == 200
     timestamp = datetime.fromtimestamp(1751052241, UTC)
     payload = response.json()
-    assert payload["run_id"] == run
     assert datetime.fromisoformat(payload["start"]) == timestamp
     assert datetime.fromisoformat(payload["end"]) == timestamp
 
@@ -168,7 +171,6 @@ def test_hour_range_normalizes_database_session_timezone(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["run_id"] == run
     for field, ts in [("start", start), ("end", end)]:
         assert datetime.fromisoformat(payload[field]) == datetime.fromtimestamp(ts, UTC)
         assert payload[field].endswith("Z")

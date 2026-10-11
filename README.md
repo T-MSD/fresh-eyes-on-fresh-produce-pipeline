@@ -115,7 +115,6 @@ an older run. Newer `running` or `failed` runs are skipped.
 
 ```json
 {
-  "run_id": 42,
   "start": "2025-06-27T08:00:00Z",
   "end": "2025-06-27T20:00:00Z"
 }
