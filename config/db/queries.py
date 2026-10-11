@@ -1,8 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from sqlalchemy import Connection, Subquery, case, func, select, update
+from sqlalchemy import Connection, Row, Subquery, case, func, select, update
 from sqlalchemy.dialects.postgresql import distinct_on
 from sqlalchemy.orm import aliased
 
@@ -18,6 +18,7 @@ from config.db.schema import (
     Task,
     TaskKind,
 )
+from ingest.planogram import Corners
 
 AreaStatus = Literal["empty", "wrong_product", "half", "ok", "unknown"]
 
@@ -155,16 +156,26 @@ class AreaPrediction:
 
 
 @dataclass(frozen=True)
-class CameraFrameArea:
+class CameraArea:
     area_id: str
     number: int
     product_id: str
     product_name: str
-    top_left: list[int]
-    top_right: list[int]
-    bottom_right: list[int]
-    bottom_left: list[int]
+    corners: Corners
+
+
+@dataclass(frozen=True)
+class CameraFrameArea(CameraArea):
     prediction: AreaPrediction | None
+
+
+def area_corners(row: Row[Any]) -> Corners:
+    return Corners(
+        top_left=row.top_left,
+        top_right=row.top_right,
+        bottom_right=row.bottom_right,
+        bottom_left=row.bottom_left,
+    )
 
 
 def get_camera_frame_areas(
@@ -205,10 +216,7 @@ def get_camera_frame_areas(
             number=row.number,
             product_id=row.product_id,
             product_name=row.product_name,
-            top_left=row.top_left,
-            top_right=row.top_right,
-            bottom_right=row.bottom_right,
-            bottom_left=row.bottom_left,
+            corners=area_corners(row),
             prediction=AreaPrediction(
                 planogram_compliant=row.planogram_compliant,
                 stock_level=row.stock_level,
@@ -295,34 +303,22 @@ class StorePredictions:
 
 
 @dataclass(frozen=True)
-class PlanogramArea:
-    area_id: str
-    number: int
-    product_id: str
-    product_name: str
-    top_left: list[int]
-    top_right: list[int]
-    bottom_right: list[int]
-    bottom_left: list[int]
-
-
-@dataclass(frozen=True)
 class PlanogramCamera:
     camera: str
     camera_name: str | None
-    areas: list[PlanogramArea]
+    areas: list[CameraArea]
 
 
 def get_cameras(connection: Connection, run: SelectedRun) -> list[PlanogramCamera]:
     """Every camera of the run's dataset by camera id, each with its areas by area number."""
-    areas: dict[int, list[PlanogramArea]] = {}
+    areas: dict[int, list[CameraArea]] = {}
     for row in connection.execute(
         select(
             Area.camera_id,
-            Area.external_id,
+            Area.external_id.label("area_id"),
             Area.number,
-            Product.external_id,
-            Product.name,
+            Product.external_id.label("product_id"),
+            Product.name.label("product_name"),
             Area.top_left,
             Area.top_right,
             Area.bottom_right,
@@ -332,7 +328,15 @@ def get_cameras(connection: Connection, run: SelectedRun) -> list[PlanogramCamer
         .where(Area.dataset_id == run.dataset_id)
         .order_by(Area.number, Area.external_id)
     ):
-        areas.setdefault(row[0], []).append(PlanogramArea(*row[1:]))
+        areas.setdefault(row.camera_id, []).append(
+            CameraArea(
+                area_id=row.area_id,
+                number=row.number,
+                product_id=row.product_id,
+                product_name=row.product_name,
+                corners=area_corners(row),
+            )
+        )
     cameras = connection.execute(
         select(Camera.id, Camera.external_id, Camera.name)
         .where(Camera.dataset_id == run.dataset_id)

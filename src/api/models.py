@@ -42,12 +42,7 @@ class CamerasResponse(BaseModel):
     cameras: list[CameraResponse]
 
 
-class FrameAreaResponse(BaseModel):
-    area_id: str
-    number: int
-    product_id: str
-    product_name: str
-    corners: CornersResponse
+class FrameAreaResponse(CameraAreaResponse):
     prediction: PredictionResponse | None
 
 

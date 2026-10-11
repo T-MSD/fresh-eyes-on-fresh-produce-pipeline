@@ -9,13 +9,10 @@ from config.db.queries import get_area_stock, get_camera_frame, get_camera_frame
 from src.api.dependencies import CompletedRun, DatabaseConnection, RequestedFrame
 from src.api.models import (
     AreaStockResponse,
-    CameraAreaResponse,
     CameraResponse,
     CamerasResponse,
-    CornersResponse,
     FrameAreaResponse,
     FrameResponse,
-    PredictionResponse,
 )
 
 router = APIRouter(tags=["frames"])
@@ -25,25 +22,7 @@ router = APIRouter(tags=["frames"])
 def cameras(connection: DatabaseConnection, run: CompletedRun) -> CamerasResponse:
     return CamerasResponse(
         cameras=[
-            CameraResponse(
-                camera=camera.camera,
-                camera_name=camera.camera_name,
-                areas=[
-                    CameraAreaResponse(
-                        area_id=area.area_id,
-                        number=area.number,
-                        product_id=area.product_id,
-                        product_name=area.product_name,
-                        corners=CornersResponse(
-                            top_left=area.top_left,
-                            top_right=area.top_right,
-                            bottom_right=area.bottom_right,
-                            bottom_left=area.bottom_left,
-                        ),
-                    )
-                    for area in camera.areas
-                ],
-            )
+            CameraResponse.model_validate(camera, from_attributes=True)
             for camera in get_cameras(connection, run)
         ]
     )
@@ -61,26 +40,10 @@ def get_frame(
     frame = get_camera_frame(connection, run, camera, at)
     if frame is None:
         raise HTTPException(status_code=404, detail="Frame not found in the latest completed run")
-    areas = []
-    for row in get_camera_frame_areas(connection, run, frame):
-        prediction = None
-        if row.prediction is not None:
-            prediction = PredictionResponse.model_validate(row.prediction, from_attributes=True)
-        areas.append(
-            FrameAreaResponse(
-                area_id=row.area_id,
-                number=row.number,
-                product_id=row.product_id,
-                product_name=row.product_name,
-                corners=CornersResponse(
-                    top_left=row.top_left,
-                    top_right=row.top_right,
-                    bottom_right=row.bottom_right,
-                    bottom_left=row.bottom_left,
-                ),
-                prediction=prediction,
-            )
-        )
+    areas = [
+        FrameAreaResponse.model_validate(area, from_attributes=True)
+        for area in get_camera_frame_areas(connection, run, frame)
+    ]
     return FrameResponse(
         camera=frame.camera,
         camera_name=frame.camera_name,

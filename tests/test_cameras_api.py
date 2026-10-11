@@ -1,20 +1,10 @@
 from datetime import UTC, datetime, timedelta
 
-import pytest
 from sqlalchemy import update
 
 from config.db.schema import Camera
 from tests.builders import CORNERS
 from tests.db_builders import add_area, add_camera, add_dataset, add_frame, add_product, add_run
-
-
-@pytest.mark.parametrize("status", [None, "running", "failed"])
-def test_without_completed_run(db, client, dataset, status):
-    if status is not None:
-        add_run(db, dataset, status=status)
-    response = client.get("/cameras")
-    assert response.status_code == 404
-    assert response.json() == {"detail": "No completed runs available"}
 
 
 def test_every_camera_with_its_planogram(db, client, dataset, camera):

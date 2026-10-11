@@ -20,7 +20,13 @@ from tests.db_builders import (
 
 
 @pytest.mark.parametrize(
-    "endpoint", ["/cameras/6215/frame", "/images/6215/1751052241.jpg", "/areas/6215_1/stock"]
+    "endpoint",
+    [
+        "/cameras",
+        "/cameras/6215/frame",
+        "/images/6215/1751052241.jpg",
+        "/areas/6215_1/stock",
+    ],
 )
 @pytest.mark.parametrize("status", [None, "running", "failed"])
 def test_without_completed_run(db, client, dataset, endpoint, status):
