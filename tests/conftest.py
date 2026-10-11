@@ -10,6 +10,7 @@ from sqlalchemy import Connection, Engine, text
 from sqlalchemy.engine import URL, make_url
 
 from config.db.connection import get_connection, make_engine
+from src.api import dependencies
 from src.main import app
 from tests.db_builders import add_camera, add_dataset, add_product
 
@@ -79,6 +80,7 @@ def camera(db: Connection, dataset: int) -> int:
 @pytest.fixture
 def client(db: Connection) -> Iterator[TestClient]:
     app.dependency_overrides[get_connection] = lambda: db
+    app.dependency_overrides[dependencies.transaction] = lambda: db
     try:
         with TestClient(app) as client:
             yield client
