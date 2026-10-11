@@ -95,7 +95,9 @@ and `/cameras/{camera}/frame` both use it, so they always show the same frame.
 `area_id`, `product_id`, `product_name`, `status` (`empty` / `wrong_product` / `half` / `ok` /
 `unknown`) and `prediction` (the camera view's prediction shape, `null` and `status: unknown`
 when the area has no prediction in that frame). Cameras come most urgent first: more `empty`,
-then more `wrong_product`, then more `half`, then camera id.
+then more `wrong_product`, then more `half`, then more `unknown`, then camera id. A `camera`
+outside the run's dataset returns `404` with `{"detail": "Camera not found in the latest
+completed run"}`; a known camera without a frame by `at` returns `{"cameras": []}`.
 
 These endpoints skip `running` and `failed` runs, order completed runs by `started_at` then `id`
 descending, and return `404` with `{"detail": "No completed runs available"}` when none exist.

@@ -22,7 +22,7 @@ from config.db.schema import (
 AreaStatus = Literal["empty", "wrong_product", "half", "ok", "unknown"]
 
 TASK_PRIORITY: dict[TaskKind, int] = {"restock": 1, "move_product": 2, "top_up": 3}
-URGENT: tuple[AreaStatus, ...] = ("empty", "wrong_product", "half")
+URGENT: tuple[AreaStatus, ...] = ("empty", "wrong_product", "half", "unknown")
 
 
 @dataclass(frozen=True)
@@ -295,6 +295,17 @@ class StorePredictions:
     cameras: list[StoreCamera]
 
 
+def has_camera(connection: Connection, run: SelectedRun, camera: str) -> bool:
+    return (
+        connection.scalar(
+            select(Camera.id).where(
+                Camera.dataset_id == run.dataset_id, Camera.external_id == camera
+            )
+        )
+        is not None
+    )
+
+
 def get_predictions(
     connection: Connection,
     run: SelectedRun,
@@ -306,7 +317,7 @@ def get_predictions(
     A camera without a frame by `at` is left out. An area is `unknown` without a prediction in
     the run, else `empty`, else `wrong_product` when not compliant, else `half`, else `ok`.
     Cameras with more empty areas come first, then more wrong products, then more half areas,
-    then by camera id. `camera` keeps only that camera; an unknown camera has none.
+    then more unknown areas, then by camera id. `camera` keeps only that camera.
     """
     latest = latest_frames(run, at, camera)
     detected = aliased(Product)

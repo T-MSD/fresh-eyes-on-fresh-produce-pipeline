@@ -166,8 +166,9 @@ the most recent completed run, with the same `latest_run()` selection as `/hour-
 camera shows the same frame as `GET /cameras/{camera}/frame?at=`: both use `latest_frames()`,
 the newest frame at or before `at` (an ISO 8601 time with a time zone; without `at`, the newest
 frame) in the run's dataset, with or without predictions, ties resolved to the highest filename.
-A camera without a frame by `at` is left out. The optional `camera` keeps only that camera; an
-unknown camera returns no cameras.
+A camera without a frame by `at` is left out. The optional `camera` keeps only that camera; a
+known camera without a frame by `at` returns `{"cameras": []}`, and a camera that is not in the
+run's dataset returns `404` with `{"detail": "Camera not found in the latest completed run"}`.
 
 ```json
 {
@@ -195,8 +196,8 @@ planogram. An area without a prediction in that frame and run has `status: unkno
 `prediction: null`; older frames and runs never fill the gap, so an empty completed run shows
 every area as `unknown`. Otherwise `status` is `empty`, else `wrong_product` when it is not
 compliant, else `half`, else `ok`. Cameras are sorted most urgent first: more `empty` areas,
-then more `wrong_product`, then more `half`, then camera id; `unknown` areas do not raise
-urgency. A confidence is `null` when the method gives no estimate. With no completed runs, the
+then more `wrong_product`, then more `half`, then more `unknown`, then camera id, so a camera
+without data never looks healthier than one that is fully `ok`. A confidence is `null` when the method gives no estimate. With no completed runs, the
 endpoint returns `404` with `{"detail": "No completed runs available"}`.
 
 ## Layout

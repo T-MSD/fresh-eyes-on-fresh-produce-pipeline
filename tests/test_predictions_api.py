@@ -8,6 +8,7 @@ from tests.assertions import iso
 from tests.db_builders import (
     add_area,
     add_camera,
+    add_dataset,
     add_frame,
     add_prediction,
     add_product,
@@ -254,7 +255,7 @@ def test_sorts_cameras_most_urgent_first(db: Connection, client: TestClient, dat
         "6594": [(False, "full"), (True, "half"), (True, "half"), (True, "half")],
         "6373": [(False, "full"), (False, "half")],
         "6443": [(True, "empty"), (True, "full")],
-        "6100": [None],
+        "6900": [None, None],
     }
     for external_id, areas in cameras.items():
         camera_id = add_camera(db, dataset, external_id)
@@ -280,7 +281,7 @@ def test_sorts_cameras_most_urgent_first(db: Connection, client: TestClient, dat
         "6373",
         "6594",
         "6386",
-        "6100",
+        "6900",
         "6215",
         "6371",
     ]
@@ -329,13 +330,27 @@ def test_filters_by_camera(db: Connection, client: TestClient, dataset: int, cam
     assert [snapshot["camera"] for snapshot in cameras] == ["6383"]
 
 
-def test_unknown_camera_has_no_predictions(
-    db: Connection, client: TestClient, dataset: int, camera: int
+@pytest.mark.parametrize("external_id", ["9999", "6383"])
+def test_unknown_camera_is_not_found(
+    db: Connection, client: TestClient, dataset: int, camera: int, external_id: str
 ):
     run_id = add_run(db, dataset, status="done")
     add_prediction(db, run_id, add_frame(db, camera), add_area(db, camera, 1), camera)
+    add_camera(db, add_dataset(db), "6383")
 
-    response = client.get("/predictions", params={"camera": "9999"})
+    response = client.get("/predictions", params={"camera": external_id})
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Camera not found in the latest completed run"}
+
+
+def test_known_camera_without_a_frame_by_at_has_no_cameras(
+    db: Connection, client: TestClient, dataset: int, camera: int
+):
+    run_id = add_run(db, dataset, status="done")
+    add_prediction(db, run_id, add_frame(db, camera, NOON), add_area(db, camera, 1), camera)
+
+    response = client.get("/predictions", params={"camera": "6215", "at": iso(MORNING)})
 
     assert response.status_code == 200
     assert response.json() == {"cameras": []}
