@@ -22,9 +22,9 @@ class HourRangeResponse(BaseModel):
         return value.astimezone(UTC) if value is not None else None
 
 
-@router.get("/hour-range", responses={404: {"description": "No runs available"}})
+@router.get("/hour-range", responses={404: {"description": "No completed runs available"}})
 def hour_range(connection: Annotated[Connection, Depends(get_connection)]) -> HourRangeResponse:
     result = get_hour_range(connection)
     if result is None:
-        raise HTTPException(status_code=404, detail="No runs available")
+        raise HTTPException(status_code=404, detail="No completed runs available")
     return HourRangeResponse.model_validate(result, from_attributes=True)

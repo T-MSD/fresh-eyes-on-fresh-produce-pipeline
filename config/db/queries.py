@@ -39,7 +39,13 @@ class PendingTasks:
 
 
 def latest_run() -> Subquery:
-    return select(Run.id).order_by(Run.started_at.desc(), Run.id.desc()).limit(1).subquery()
+    return (
+        select(Run.id)
+        .where(Run.status == "done")
+        .order_by(Run.started_at.desc(), Run.id.desc())
+        .limit(1)
+        .subquery()
+    )
 
 
 def get_hour_range(connection: Connection) -> HourRange | None:
@@ -58,7 +64,7 @@ def get_hour_range(connection: Connection) -> HourRange | None:
 
 
 def get_pending_tasks(connection: Connection) -> PendingTasks | None:
-    """Tasks of the latest run not marked done, open or closed, by priority then opening time."""
+    """Pending tasks of the latest completed run, ordered by priority then opening time."""
     run_id = connection.scalar(select(latest_run().c.id))
     if run_id is None:
         return None

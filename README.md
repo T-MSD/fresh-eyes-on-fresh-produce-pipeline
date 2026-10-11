@@ -66,6 +66,9 @@ planogram id (`6215`, `11908`, `6215_2`) in `external_id`, unique within one dat
 planogram can reuse the same ids in a later load. Generated ids stay inside the database;
 everything outside it uses `external_id`.
 
+Every timestamp is a `timestamptz` column of type `UTCDateTime`, so every query reads it back in
+UTC, whatever the session time zone.
+
 Composite foreign keys keep each row inside one dataset: an area's camera and product, and a
 prediction's run, camera and detected product, all belong to the same dataset.
 
@@ -105,9 +108,10 @@ uv run --env-file .env uvicorn src.main:app --reload
 ```
 
 `GET /hour-range` returns the earliest and latest frame timestamps with predictions in the
-most recent run. All API record queries must use `config.db.queries.latest_run()` to scope
+most recent completed run. All API record queries must use `config.db.queries.latest_run()` to scope
 records to the run with the newest `started_at`, breaking ties by the highest `id`.
-Run status does not affect selection; an empty newest run never falls back to an older run.
+Only completed (`done`) runs are selected; an empty newest completed run never falls back to
+an older run. Newer `running` or `failed` runs are skipped.
 
 ```json
 {
@@ -119,12 +123,12 @@ Run status does not affect selection; an empty newest run never falls back to an
 
 The bounds are full frame timestamps normalized to UTC (`Z`), regardless of the database session
 timezone. For a run without predictions,
-`start` and `end` are `null`. With no runs, the endpoint returns `404` with
-`{"detail": "No runs available"}`. Interactive API documentation is at `/docs`.
+`start` and `end` are `null`. With no completed runs, the endpoint returns `404` with
+`{"detail": "No completed runs available"}`. Interactive API documentation is at `/docs`.
 
-`GET /tasks` returns the tasks of the most recent run that staff have not marked done. It uses
-the same `latest_run()` selection as `/hour-range`; a newest run without pending tasks never
-falls back to an older run.
+`GET /tasks` returns the tasks of the most recent completed run that staff have not marked done.
+It uses the same `latest_run()` selection as `/hour-range`; a newest completed run without
+pending tasks never falls back to an older run.
 
 ```json
 {
@@ -140,8 +144,8 @@ falls back to an older run.
 Tasks are sorted by priority (`restock`, `move_product`, `top_up`), then by opening time,
 camera and area, with creation order breaking any remaining tie. No database id is returned.
 Closed tasks are included with their closing frame, so the time slider can tell which were
-still open at any moment; `closed` is `null` while a task is open. With no runs, the endpoint
-returns `404` with `{"detail": "No runs available"}`. Interactive API documentation is at
+still open at any moment; `closed` is `null` while a task is open. With no completed runs, the endpoint
+returns `404` with `{"detail": "No completed runs available"}`. Interactive API documentation is at
 `/docs`.
 
 ## Layout

@@ -36,13 +36,13 @@ def iso(ts: int) -> str:
 def test_tasks_without_runs(client: TestClient):
     response = client.get("/tasks")
     assert response.status_code == 404
-    assert response.json() == {"detail": "No runs available"}
+    assert response.json() == {"detail": "No completed runs available"}
 
 
 def test_lists_tasks_of_the_latest_run_not_marked_done(
     db: Connection, client: TestClient, dataset: int, camera: int
 ):
-    run_id, area_id = add_run(db, dataset), add_area(db, camera, 2)
+    run_id, area_id = add_run(db, dataset, status="done"), add_area(db, camera, 2)
     opened, closed, later = (
         add_predicted_frame(db, run_id, area_id, camera, ts) for ts in (MORNING, NOON, EVENING)
     )
@@ -70,7 +70,7 @@ def test_lists_tasks_of_the_latest_run_not_marked_done(
 def test_open_task_has_no_closing_frame(
     db: Connection, client: TestClient, dataset: int, camera: int
 ):
-    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    run_id, area_id = add_run(db, dataset, status="done"), add_area(db, camera, 1)
     add_task(db, run_id, area_id, add_predicted_frame(db, run_id, area_id, camera))
 
     [task] = client.get("/tasks").json()["tasks"]
@@ -83,7 +83,7 @@ def test_frame_timestamps_are_utc_whatever_the_session_timezone(
     db: Connection, client: TestClient, dataset: int, camera: int, timezone: str
 ):
     db.execute(text("SELECT set_config('TimeZone', :timezone, true)"), {"timezone": timezone})
-    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    run_id, area_id = add_run(db, dataset, status="done"), add_area(db, camera, 1)
     opened, closed = (
         add_predicted_frame(db, run_id, area_id, camera, ts) for ts in (MORNING, NOON)
     )
@@ -95,7 +95,7 @@ def test_frame_timestamps_are_utc_whatever_the_session_timezone(
 
 
 @pytest.mark.parametrize("status", ["running", "done", "failed"])
-def test_only_latest_run_tasks_whatever_its_status(
+def test_only_latest_completed_run_tasks(
     db: Connection, client: TestClient, dataset: int, camera: int, status
 ):
     area_id, frame_id = add_area(db, camera, 1), add_frame(db, camera)
@@ -107,7 +107,7 @@ def test_only_latest_run_tasks_whatever_its_status(
 
     tasks = client.get("/tasks").json()["tasks"]
 
-    assert [task["kind"] for task in tasks] == ["move_product"]
+    assert [task["kind"] for task in tasks] == ["move_product" if status == "done" else "restock"]
 
 
 def test_latest_run_without_pending_tasks_never_uses_older_runs(
@@ -118,7 +118,7 @@ def test_latest_run_without_pending_tasks_never_uses_older_runs(
     older = add_run(db, dataset, started_at=started_at - timedelta(days=1), status="done")
     add_prediction(db, older, frame_id, area_id, camera)
     add_task(db, older, area_id, frame_id)
-    latest = add_run(db, dataset, started_at=started_at)
+    latest = add_run(db, dataset, started_at=started_at, status="done")
     add_prediction(db, latest, frame_id, area_id, camera)
     add_task(db, latest, area_id, frame_id, done_at=datetime.now(UTC))
 
@@ -131,7 +131,7 @@ def test_latest_run_without_pending_tasks_never_uses_older_runs(
 def test_sorts_by_priority_then_opening_time(
     db: Connection, client: TestClient, dataset: int, camera: int
 ):
-    run_id = add_run(db, dataset)
+    run_id = add_run(db, dataset, status="done")
     frames = {ts: add_frame(db, camera, ts) for ts in (MORNING, NOON)}
     for number, kind, ts in [
         (1, "top_up", MORNING),
@@ -156,7 +156,7 @@ def test_sorts_by_priority_then_opening_time(
 def test_tasks_tied_on_every_other_key_keep_creation_order(
     db: Connection, client: TestClient, dataset: int, camera: int
 ):
-    run_id, area_id = add_run(db, dataset), add_area(db, camera, 1)
+    run_id, area_id = add_run(db, dataset, status="done"), add_area(db, camera, 1)
     names = ["b.jpg", "a.jpg", "c.jpg"]
     frames = [add_frame(db, camera, MORNING, filename=name) for name in names]
     for frame_id in frames:
