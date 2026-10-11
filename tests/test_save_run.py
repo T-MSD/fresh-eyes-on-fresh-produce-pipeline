@@ -9,7 +9,7 @@ from config.db.load import load_dataset
 from config.db.save_run import UnusableRun, fallback_keys, latest_dataset_id, save_run
 from config.db.schema import Prediction, Run
 from ingest.dataset import read_dataset
-from tests.builders import area, write_dataset
+from tests.builders import area, label, write_dataset
 
 
 @pytest.fixture
@@ -22,10 +22,6 @@ def dataset_id(db: Connection, tmp_path: Path) -> int:
         )
     )
     return load_dataset(db, dataset).dataset_id
-
-
-def label(level: str = "full", compliant: bool = True) -> dict:
-    return {"planogram_compliant": compliant, "stock_level": level}
 
 
 def complete() -> dict:

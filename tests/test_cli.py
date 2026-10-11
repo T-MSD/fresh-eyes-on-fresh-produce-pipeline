@@ -2,10 +2,15 @@ import json
 from pathlib import Path
 
 import pytest
+from sqlalchemy import Engine, delete, select
 from typer.testing import CliRunner
 
 from cli import app
-from tests.builders import area, write_dataset, write_frame_bytes
+from config.db.load import load_dataset
+from config.db.save_run import save_run
+from config.db.schema import Task
+from ingest.dataset import read_dataset
+from tests.builders import area, label, write_dataset, write_frame_bytes
 
 NO_PATHS = {"PLANOGRAM_PATH": None, "IMAGES_DIR": None}
 
@@ -125,3 +130,50 @@ def test_save_run_reports_a_file_that_is_not_json(tmp_path: Path):
 
     assert result.exit_code == 1
     assert "not valid JSON" in result.output
+
+
+def run_derive_tasks(engine: Engine, run_id: int):
+    env = {**NO_PATHS, "DATABASE_URL": engine.url.render_as_string(hide_password=False)}
+    return CliRunner().invoke(app, ["derive-tasks", str(run_id)], env=env)
+
+
+def commit_run(engine: Engine, root: Path, *, with_tasks: bool) -> int:
+    with engine.begin() as db:
+        dataset = read_dataset(
+            *write_dataset(root, {"6215": [area("6215_1")]}, {"6215": [1751052241]})
+        )
+        dataset_id = load_dataset(db, dataset).dataset_id
+        predictions = {"6215": {"1751052241.jpg": {"6215_1": label("empty")}}}
+        run_id = save_run(db, dataset_id, predictions, method="run_test")
+        if not with_tasks:
+            db.execute(delete(Task).where(Task.run_id == run_id))
+    return run_id
+
+
+def test_derive_tasks_stores_the_tasks_of_a_run_without_any(committed: Engine, tmp_path: Path):
+    run_id = commit_run(committed, tmp_path, with_tasks=False)
+
+    result = run_derive_tasks(committed, run_id)
+
+    assert result.exit_code == 0, result.output
+    assert f"stored 1 tasks for run {run_id}" in result.output
+    with committed.connect() as db:
+        assert db.scalars(select(Task.kind).where(Task.run_id == run_id)).all() == ["restock"]
+
+
+def test_derive_tasks_refuses_a_run_that_already_has_tasks(committed: Engine, tmp_path: Path):
+    run_id = commit_run(committed, tmp_path, with_tasks=True)
+
+    result = run_derive_tasks(committed, run_id)
+
+    assert result.exit_code == 1
+    assert f"run {run_id} already has tasks" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_derive_tasks_refuses_an_unknown_run(committed: Engine):
+    result = run_derive_tasks(committed, 999999)
+
+    assert result.exit_code == 1
+    assert "run 999999 does not exist" in result.output
+    assert "Traceback" not in result.output
