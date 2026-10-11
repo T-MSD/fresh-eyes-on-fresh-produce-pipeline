@@ -7,7 +7,7 @@ assignment's points (POINTS[predicted, true]). Splits are repeated with differen
 the spread shows how noisy 150 labels are. It says which rule is more learnable, not which one the
 hidden annotators used.
 
-    python src/fill_probe.py
+    uv run --env-file .env python -m src.fill_probe
 """
 
 import json

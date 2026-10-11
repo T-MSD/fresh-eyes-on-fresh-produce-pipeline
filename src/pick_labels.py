@@ -9,7 +9,7 @@
 Areas that run off the edge of the image are skipped, because labelling them needs a rule
 that has not been agreed.
 
-    python src/pick_labels.py --informative 40 --random 10
+    uv run --env-file .env python -m src.pick_labels --informative 40 --random 10
 """
 
 import json

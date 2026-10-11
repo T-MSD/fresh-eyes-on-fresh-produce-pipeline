@@ -126,11 +126,15 @@ def test_final_training_rebuilds_model_without_labels_all(tmp_path):
     (crops / "index.json").write_text(json.dumps(items))
     (tmp_path / "labels.json").write_text(json.dumps(manual))
     (tmp_path / "clip_zeroshot.json").write_text(json.dumps(manual))
+    fill = {key: {"fill": 20.0 + 30 * n} for n, key in enumerate(manual)}
+    (tmp_path / "fill_labels.json").write_text(json.dumps(fill))
     np.savez(tmp_path / "clip_embeddings.npz", embeddings=np.eye(3))
     np.save(tmp_path / "clip_level_probs.npy", np.eye(3))
     main(final=True, out_dir=tmp_path, backbone="resnet18", pretrained=False, size=64, epochs=1)
     assert not (tmp_path / "labels_all.json").exists()
     assert (tmp_path / "finetune" / "model.pt").stat().st_size > 0
+    assert (tmp_path / "finetune" / "bundle.joblib").stat().st_size > 0
+    assert json.loads((tmp_path / "finetune" / "classes.json").read_text()) == ["bananas"]
     predictions = json.loads((tmp_path / "finetune" / "predictions.json").read_text())
     assert set(predictions["6215"]) == {item["image"] for item in items}
 

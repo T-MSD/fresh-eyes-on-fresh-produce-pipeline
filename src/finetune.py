@@ -9,8 +9,11 @@ classes) and planogram_compliant.
             alone, so no information about the held-out labels leaks in. Scores only the held-out
             MANUAL labels, next to zero-shot CLIP and the current classifier on the same cameras.
   --final   regenerates confident labels from out/labels.json and CLIP outputs for every camera,
-            then writes out/finetune/predictions.json and model.pt.
-            It does not touch out/predictions.json.
+            then writes out/finetune/predictions.json, model.pt and the inference bundle
+            out/finetune/bundle.joblib next to it. It does not touch out/predictions.json.
+  --bundle-only  rebuilds bundle.joblib from the current crops index and labels, without training.
+            It stops unless the classes of that index match the ones in out/finetune/classes.json,
+            written next to model.pt.
 
     uv run --extra ml --env-file .env python -m src.finetune --holdout 6371,6443,6591
     uv run --extra ml --env-file .env python -m src.finetune --final
@@ -19,6 +22,7 @@ classes) and planogram_compliant.
 import json
 from pathlib import Path
 
+import joblib
 import numpy as np
 import timm
 import torch
@@ -26,14 +30,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 import typer
 from PIL import Image
+from sklearn.linear_model import Ridge
 
 from src.clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class
 from src.prediction_io import merge_fallbacks
-from src.train_classifier import features, fit_proba
+from src.train_classifier import features, fit_classifier, fit_proba
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 WORK = OUT / "finetune"
+BUNDLE = WORK / "bundle.joblib"
+CLASSES = WORK / "classes.json"
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
@@ -98,6 +105,56 @@ def predict(model, imgs, cls, device, batch=64):
     return torch.cat(stock).numpy(), torch.cat(ok).numpy()
 
 
+def build_bundle(items: list[dict], manual: dict, emb: np.ndarray, fill: dict) -> dict:
+    """Everything run_test needs from the training data, so it never reads the training crops.
+
+    train_classes is the class order of the network head: model.pt is only valid with the
+    bundle written next to it.
+    """
+    mean, std = emb.mean(axis=0), emb.std(axis=0)
+    x = (emb - mean) / (std + 1e-6)
+    rows = [n for n, i in enumerate(items) if i["key"] in manual]
+    y = np.array([LEVELS.index(manual[items[n]["key"]]["stock_level"]) for n in rows])
+    key_row = {i["key"]: n for n, i in enumerate(items)}
+    fill_keys = [k for k in fill if k in key_row]
+    return {
+        "train_classes": head_classes(items),
+        "emb_mean": mean,
+        "emb_std": std,
+        "classifier": fit_classifier(x[rows], y, 0.1),
+        "fill_model": Ridge(alpha=300.0).fit(
+            x[[key_row[k] for k in fill_keys]], np.array([fill[k] for k in fill_keys], dtype=float)
+        ),
+    }
+
+
+def head_classes(items: list[dict]) -> list[str]:
+    return sorted({product_class(i["product_name"]) for i in items})
+
+
+def check_head_classes(work_dir: Path, items: list[dict]) -> None:
+    """Stop unless the classes of `items` are, in order, the ones model.pt was trained with."""
+    path = work_dir / CLASSES.name
+    if not path.exists():
+        raise typer.BadParameter(
+            f"{path} is missing, so the class order of model.pt is unknown: run finetune --final"
+        )
+    trained, current = json.loads(path.read_text()), head_classes(items)
+    if trained != current:
+        raise typer.BadParameter(
+            f"model.pt was trained with {trained}, the crops index now gives {current}: "
+            "a bundle built from it would score the wrong products. Run finetune --final"
+        )
+
+
+def load_fill_labels(out_dir: Path = OUT) -> dict:
+    return {
+        k: v["fill"]
+        for k, v in json.loads((out_dir / "fill_labels.json").read_text()).items()
+        if not v.get("wrong")
+    }
+
+
 def regenerate_labels(items, manual, train_cams, emb, zs_probs, zero) -> dict:
     """CLIP labels as before, but fitted on the manual labels of the training cameras only."""
     x = features(emb, zs_probs, False)
@@ -127,6 +184,7 @@ def regenerate_labels(items, manual, train_cams, emb, zs_probs, zero) -> dict:
 def main(
     holdout: str = "6371,6443,6591",
     final: bool = False,
+    bundle_only: bool = False,
     backbone: str = "resnet50.a1_in1k",
     size: int = 224,
     epochs: int = 8,
@@ -149,13 +207,20 @@ def main(
     # to measure what a batch of labels added.
     dropped = set(json.loads(ignore.read_text())) if ignore else set()
     manual_train = {k: v for k, v in manual.items() if k not in dropped}
+    if bundle_only:
+        check_head_classes(work_dir, items)
+        joblib.dump(
+            build_bundle(items, manual, emb, load_fill_labels(out_dir)), work_dir / BUNDLE.name
+        )
+        typer.echo(f"wrote {work_dir / BUNDLE.name}")
+        return
     cams = sorted({i["camera"] for i in items})
     test_cams = set() if final else set(holdout.split(","))
     train_cams = set(cams) - test_cams
 
     labels = regenerate_labels(items, manual_train, train_cams, emb, zs_probs, zero)
 
-    classes = sorted({product_class(i["product_name"]) for i in items})
+    classes = head_classes(items)
     cls = torch.tensor([classes.index(product_class(i["product_name"])) for i in items])
     imgs = load_crops(items, size, out_dir / "crops", work_dir)
 
@@ -241,8 +306,13 @@ def main(
         np.save(work_dir / "stock_probs.npy", p_stock)
         np.save(work_dir / "ok_probs.npy", p_ok)
         torch.save(model.state_dict(), work_dir / "model.pt")
+        (work_dir / CLASSES.name).write_text(json.dumps(classes))
+        joblib.dump(
+            build_bundle(items, manual, emb, load_fill_labels(out_dir)), work_dir / BUNDLE.name
+        )
         typer.echo(
-            f"wrote out/finetune/predictions.json for {len(items)} areas (out/predictions.json untouched)"
+            f"wrote out/finetune/predictions.json, model.pt and bundle.joblib for {len(items)} areas "
+            "(out/predictions.json untouched)"
         )
         return
 

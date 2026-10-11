@@ -4,7 +4,7 @@ Rule: empty = one typical purchase would leave the tray bare or nearly bare. Gro
 purchase and the method: "count" (OWL-ViT on loose items) or "fill" (CLIP probe, for packages/bunches).
 First matching keyword wins, so order matters. Edit GROUPS, rerun, and review ambiguous names.
 
-    python src/product_groups.py
+    uv run --env-file .env python -m src.product_groups
 """
 
 import json

@@ -2,10 +2,10 @@
 
 Both files agree everywhere else, so the strategy with more right answers on these crops is the better
 one under YOUR rule. Sides are shuffled (A/B) so the page does not hint which is which; the export
-records the mapping. Export -> out/compare_strategies.json, then:  python src/compare_strategies.py --score
+records the mapping. Export -> out/compare_strategies.json, then:  uv run --env-file .env python -m src.compare_strategies --score
 
-    python src/compare_strategies.py [--n 100]
-    python src/compare_strategies.py --score
+    uv run --env-file .env python -m src.compare_strategies [--n 100]
+    uv run --env-file .env python -m src.compare_strategies --score
 """
 
 import base64

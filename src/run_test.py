@@ -3,12 +3,16 @@
   1. crop every planogram area of the new data           (src/crop_areas.py, into out/test/crops)
   2. CLIP: embeddings, zero-shot stock probabilities, compliance flag (same prompts as clip_predict.py)
   3. fine-tuned network (out/finetune/model.pt, no training)  -> stock probabilities
-  4. CLIP + logistic regression fitted on the 404 hand labels -> stock probabilities
+  4. CLIP + logistic regression fitted on the 404 hand labels (from the bundle) -> stock probabilities
   5. stock = 0.75 network + 0.25 classifier, level picked by expected points (leans low when unsure)
   6. one extra rule: for percentage-method products, a blend "empty/half" becomes "full" if the fill
-     model (ridge on CLIP, fitted on out/fill_labels.json) says >= 65%. Judged on 22+1 crops: 19 right, 4 wrong.
+     model (ridge on CLIP, from the bundle) says >= 65%. Judged on 22+1 crops: 19 right, 4 wrong.
      Skipped for products missing from out/product_groups.json.
-planogram_compliant is the zero-shot CLIP flag. Nothing under out/ except out/test/ is written.
+planogram_compliant is the zero-shot CLIP flag. A product no class rule knows is scored by the
+classifier alone and counted compliant. Nothing under out/ except out/test/ is written.
+
+Reads only out/finetune/model.pt, out/finetune/bundle.joblib (both from finetune --final) and
+out/product_groups.json. --selftest also reads the training crops it rebuilds the submission from.
 
     uv run --extra ml --env-file .env python -m src.run_test --data-dir <dataset-folder>
     uv run --extra ml --env-file .env python -m src.run_test --selftest
@@ -18,10 +22,13 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Annotated
 
 import numpy as np
 import typer
 
+from config.db.connection import make_engine
+from config.db.save_run import UnusableRun, fallback_keys, latest_dataset_id, save_run
 from src.clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class, softmax
 from src.prediction_io import NetworkCrop, merge_fallbacks
 
@@ -30,13 +37,23 @@ OUT = ROOT / "out"
 TEST = OUT / "test"
 BACKBONE, SIZE = "resnet50.a1_in1k", 224
 W_NET, FILL_FULL_PCT = 0.75, 65.0
+BUNDLE = OUT / "finetune" / "bundle.joblib"
+UNKNOWN_CLASS = "fresh produce"
 
 app = typer.Typer(add_completion=False)
 
 
-def standardise_with(a: np.ndarray, ref: np.ndarray) -> np.ndarray:
-    """Column-standardise `a` with the TRAINING set's mean/std (train_classifier.standardise uses its own array)."""
-    return (a - ref.mean(axis=0)) / (ref.std(axis=0) + 1e-6)
+def class_of(product_name: str) -> str:
+    """The product's class, or a generic one for a product no class rule knows."""
+    try:
+        return product_class(product_name)
+    except ValueError:
+        return UNKNOWN_CLASS
+
+
+def standardise_with(a: np.ndarray, bundle: dict) -> np.ndarray:
+    """Column-standardise `a` with the TRAINING set's mean/std stored in the bundle."""
+    return (a - bundle["emb_mean"]) / (bundle["emb_std"] + 1e-6)
 
 
 def clip_zeroshot(items, crops_dir: Path, classes: list[str], topk: int, cached: np.ndarray | None):
@@ -88,21 +105,27 @@ def clip_zeroshot(items, crops_dir: Path, classes: list[str], topk: int, cached:
                 f"a supermarket shelf full of piled {c}",
             ]
         )
-        for c in classes
+        for c in [*classes, UNKNOWN_CLASS]
     }
     zs, ok = np.zeros((len(items), 3)), []
     for n, it in enumerate(items):
-        c = product_class(it["product_name"])
+        c = class_of(it["product_name"])
         zs[n] = softmax(scale * img[n] @ level_txt[c].T)
         level = LEVELS[int(np.argmax(zs[n] @ POINTS.T))]
-        ok.append(bool(level == "empty" or idx[c] in np.argsort(class_prob[n])[::-1][:topk]))
+        ok.append(
+            bool(
+                level == "empty"
+                or c == UNKNOWN_CLASS
+                or idx[c] in np.argsort(class_prob[n])[::-1][:topk]
+            )
+        )
     return img, zs, np.array(ok)
 
 
 def blend_network(
     items: list[NetworkCrop], crops_dir: Path, train_classes: list[str], p_lr: np.ndarray
 ) -> np.ndarray:
-    known = [n for n, item in enumerate(items) if product_class(item.product_name) in train_classes]
+    known = [n for n, item in enumerate(items) if class_of(item.product_name) in train_classes]
     if not known:
         return p_lr.copy()
 
@@ -127,11 +150,43 @@ def blend_network(
             ]
         ).transpose(0, 3, 1, 2)
     )
-    cls = torch.tensor([train_classes.index(product_class(items[n].product_name)) for n in known])
+    cls = torch.tensor([train_classes.index(class_of(items[n].product_name)) for n in known])
     p_known, _ = predict(model, imgs, cls, device)
     probabilities = p_lr.copy()
     probabilities[known] = W_NET * p_known + (1 - W_NET) * p_lr[known]
     return probabilities
+
+
+def write_predictions(result: dict, out_file: Path) -> None:
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(json.dumps(result, indent=1))
+
+
+def store_run(
+    result: dict, crops_dir: Path, dataset_id: int | None, data_dir: Path | None, topk: int
+) -> None:
+    fallbacks_file = crops_dir / "fallbacks.json"
+    fallback = fallback_keys(fallbacks_file) if fallbacks_file.exists() else set()
+    engine = make_engine()
+    try:
+        with engine.begin() as conn:
+            target = dataset_id if dataset_id is not None else latest_dataset_id(conn)
+            run_id = save_run(
+                conn,
+                target,
+                result,
+                method="run_test",
+                params={"data_dir": str(data_dir), "topk": topk, "w_net": W_NET},
+                fallback=fallback,
+            )
+    except UnusableRun as error:
+        for problem in error.problems:
+            typer.echo(f"error      {problem}", err=True)
+        typer.echo("predictions are in the output file; nothing was stored", err=True)
+        raise typer.Exit(1) from error
+    finally:
+        engine.dispose()
+    typer.echo(f"stored run {run_id} on dataset {target} ({len(fallback)} fallback areas)")
 
 
 @app.command()
@@ -145,12 +200,20 @@ def main(
     out_file: Path = TEST / "predictions.json",
     crops_dir: Path = TEST / "crops",
     topk: int = 5,
+    db: Annotated[
+        bool, typer.Option(help="Also store the run and its predictions in the database")
+    ] = False,
+    dataset_id: Annotated[
+        int | None,
+        typer.Option(help="Dataset load the run belongs to; default is the newest (cli.py load)"),
+    ] = None,
 ) -> None:
     if not selftest and data_dir is None:
         raise typer.BadParameter("give --data-dir, or --selftest")
+    if db and selftest:
+        raise typer.BadParameter("--db stores a run on new data; the self-test is not one")
     if selftest:
-        train_items = json.loads((OUT / "crops" / "index.json").read_text())
-        items, crops_dir = train_items, OUT / "crops"
+        items, crops_dir = json.loads((OUT / "crops" / "index.json").read_text()), OUT / "crops"
     else:
         subprocess.run(
             [
@@ -170,37 +233,40 @@ def main(
     if not items:
         result: dict = {}
         merge_fallbacks(result, crops_dir)
-        out_file.parent.mkdir(parents=True, exist_ok=True)
-        out_file.write_text(json.dumps(result, indent=1))
+        write_predictions(result, out_file)
         typer.echo(f"wrote fallbacks to {out_file}")
+        if db:
+            store_run(result, crops_dir, dataset_id, data_dir, topk)
         return
 
-    from sklearn.linear_model import Ridge
+    import joblib
 
-    from src.train_classifier import fit_proba
+    from src.train_classifier import proba_of
 
-    train_items = json.loads((OUT / "crops" / "index.json").read_text())
+    bundle = joblib.load(BUNDLE)
 
-    train_classes = sorted({product_class(i["product_name"]) for i in train_items})
-    new_classes = sorted({product_class(i["product_name"]) for i in items})
+    train_classes = bundle["train_classes"]
+    new_classes = sorted({class_of(i["product_name"]) for i in items} - {UNKNOWN_CLASS})
     classes = sorted(set(train_classes) | set(new_classes))
     unseen = sorted(set(new_classes) - set(train_classes))
     if unseen:
         typer.echo(
             f"WARNING: product classes not seen in training: {unseen}. The network cannot score them; the classifier alone is used there."
         )
+    no_rule = sorted(
+        {i["product_name"] for i in items if class_of(i["product_name"]) == UNKNOWN_CLASS}
+    )
+    if no_rule:
+        typer.echo(
+            f"WARNING: no class rule for {no_rule}. They are scored as '{UNKNOWN_CLASS}' by the classifier alone and counted compliant."
+        )
 
     # CLIP (cached embeddings only in the self-test, where the crops are the training crops).
-    train_emb = np.load(OUT / "clip_embeddings.npz")["embeddings"]
-    cached = train_emb if selftest else None
+    cached = np.load(OUT / "clip_embeddings.npz")["embeddings"] if selftest else None
     emb, _, compliant = clip_zeroshot(items, crops_dir, classes, topk, cached)
 
-    # Classifier on the hand labels, features standardised with the TRAINING statistics.
-    manual = json.loads((OUT / "labels.json").read_text())
-    rows = [n for n, i in enumerate(train_items) if i["key"] in manual]
-    y = np.array([LEVELS.index(manual[train_items[n]["key"]]["stock_level"]) for n in rows])
-    x_tr, x_new = standardise_with(train_emb, train_emb), standardise_with(emb, train_emb)
-    p_lr = fit_proba(x_tr[rows], y, x_new, 3, 0.1)
+    x_new = standardise_with(emb, bundle)
+    p_lr = proba_of(bundle["classifier"], x_new, len(LEVELS))
 
     p = blend_network(
         [NetworkCrop.model_validate(item) for item in items], crops_dir, train_classes, p_lr
@@ -209,17 +275,7 @@ def main(
 
     # The one extra rule, for percentage-method products.
     groups = json.loads((OUT / "product_groups.json").read_text())
-    fill = {
-        k: v["fill"]
-        for k, v in json.loads((OUT / "fill_labels.json").read_text()).items()
-        if not v.get("wrong")
-    }
-    key_row = {i["key"]: n for n, i in enumerate(train_items)}
-    tr_rows = [key_row[k] for k in fill if k in key_row]
-    reg = Ridge(alpha=300.0).fit(
-        x_tr[tr_rows], np.array([fill[k] for k in fill if k in key_row], dtype=float)
-    )
-    pct = np.clip(reg.predict(x_new), 0, 100)
+    pct = np.clip(bundle["fill_model"].predict(x_new), 0, 100)
     raised = 0
     for n, it in enumerate(items):
         g = groups.get(it["product_id"])
@@ -237,8 +293,9 @@ def main(
             "stock_value": STOCK_VALUES[lv],
         }
     merge_fallbacks(result, crops_dir)
-    out_file.parent.mkdir(parents=True, exist_ok=True)
-    out_file.write_text(json.dumps(result, indent=1))
+    write_predictions(result, out_file)
+    if db:
+        store_run(result, crops_dir, dataset_id, data_dir, topk)
     counts = {lv: int((level == k).sum()) for k, lv in enumerate(LEVELS)}
     typer.echo(f"wrote {out_file}: {counts}, non-compliant {int((~compliant).sum())}")
 

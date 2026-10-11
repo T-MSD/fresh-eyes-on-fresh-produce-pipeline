@@ -5,20 +5,13 @@ Sensei challenge, JunctionX Lisbon 2026. For every camera image and every planog
 
 ## Setup
 
-With uv:
-
 ```bash
 brew install uv
 uv sync                 # core: pipeline + API
-uv sync --extra ml      # adds torch, transformers, open_clip
+uv sync --extra ml      # adds torch, transformers, open_clip, google-cloud-vision
 ```
 
-With pip:
-
-```bash
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-```
+Run every script as a module through uv, from the repo root: `uv run --env-file .env python -m src.<script>`.
 
 ## Database
 
@@ -100,6 +93,26 @@ above `MAX_FRAME_PIXELS` (checked before decoding, so a bad header cannot alloca
 does not decode to the size it declares. EXIF rotation may swap width and height; the stored size
 is the decoded one, the image the planogram corners refer to. Unreadable images are listed and
 stored without a size, so their areas still get a fallback.
+
+## Storing a run
+
+A run is one set of predictions on one dataset load. `run_test --db` stores its output as a run
+(`method` `run_test`, params and git SHA recorded) next to writing `out/test/predictions.json`;
+`cli.py save-run` stores any submission-shaped file.
+
+```bash
+uv run --env-file .env python cli.py load <planogram> <images_dir>      # first: the dataset
+uv run --extra ml --env-file .env python -m src.run_test --data-dir <folder> --db  # newest load, or --dataset-id N
+uv run --env-file .env python cli.py save-run out/final_predictions.json --method hybrid
+uv run --env-file .env python cli.py save-run out/test/predictions.json --fallbacks out/test/crops/fallbacks.json
+```
+
+The run is stored in one transaction and only if it covers every area of every frame of the
+dataset; a missing area, or a frame or area the dataset does not have, stops it with the list and
+stores nothing (the JSON file is still written). Areas listed in `fallbacks.json` (unreadable
+frames) are stored with `is_fallback` set: `run_test --db` does this itself, `save-run` needs
+`--fallbacks <file>`. Confidences stay `NULL`: these methods give no estimate. Score columns stay
+`NULL` until there are dev labels to score against.
 
 ## API
 
@@ -245,7 +258,7 @@ using Python 3.12 and the local `.env`, in this order:
 | CLIP zero-shot predictions | `uv run --extra ml --env-file .env python -m src.clip_predict --topk 5` | `out/clip_zeroshot.json`, `clip_embeddings.npz`, `clip_level_probs.npy` |
 | hand-label in the browser | `uv run --extra ml --env-file .env python -m src.review_tool serve` | `out/labels.json` |
 | classifier on CLIP embeddings | `uv run --extra ml --env-file .env python -m src.train_classifier` | `out/predictions.json` |
-| fine-tuned network (all labels) | `uv run --extra ml --env-file .env python -m src.finetune --final` | `out/finetune/` (`model.pt` is not tracked) |
+| fine-tuned network (all labels) | `uv run --extra ml --env-file .env python -m src.finetune --final` | `out/finetune/` (`model.pt` and `bundle.joblib` are not tracked) |
 
 `finetune.py --final` regenerates confident training labels from `out/labels.json` and the CLIP
 outputs. Manual labels take precedence; unsure manual labels are excluded from training.
@@ -327,13 +340,32 @@ uv run --extra ml --env-file .env python -m src.run_test --data-dir <dataset-fol
 
 It crops the new frames, runs CLIP, the saved network and the classifier, blends them, applies the
 one fill rule that survived (a blend "empty/half" becomes "full" when the fill model says >= 65%) and
-writes `out/test/predictions.json`. It needs the training crop index, CLIP embeddings,
-`out/finetune/model.pt` (rebuilt with the final-training command above), `out/labels.json`,
-`out/fill_labels.json` and `out/product_groups.json`. Run with `--selftest` to compare against
-the submitted file using its original crops. The OWL count changes are omitted by this runner.
-A product class the network has not seen is scored by the classifier alone and logged as a
-warning. If all products are unseen, network loading and inference are skipped. If every frame
-is unreadable, the runner writes the complete fallback submission without loading ML artifacts.
+writes `out/test/predictions.json`. No training. If every
+frame is unreadable, it writes the complete fallback submission without loading ML artifacts.
+
+It reads only these files, so they are all you need to share (`--selftest` also reads the training
+crops it rebuilds the submission from):
+
+```
+uv run --extra ml --env-file .env python -m src.finetune --final   # writes out/finetune/
+  model.pt          network weights
+  bundle.joblib     class order of the network head, CLIP standardisation, classifier, fill model
+  classes.json      the class order model.pt was trained with
+out/product_groups.json
+```
+
+`model.pt` is only valid with the bundle written next to it. `python -m src.finetune --bundle-only`
+rebuilds the bundle from `out/crops/index.json`, `out/labels.json` and `out/fill_labels.json` without
+training. It stops unless the classes of that index are, in order, the ones in `classes.json`, so it
+cannot write a bundle that scores the wrong products; a `model.pt` from before `classes.json`
+existed needs `--final` again.
+
+`--selftest` compares against the submitted file using its original crops. The OWL count changes
+are omitted by this runner. A product class the network has not seen is scored by the classifier
+alone and logged as a warning; if all products are unseen, network loading and inference are
+skipped. A product no class rule knows is scored as generic `fresh produce` by the classifier alone
+and counted compliant, with a warning naming it. That generic class takes no part in the class
+comparison that sets compliance for the other areas, so it cannot change their flag.
 
 Tracked files under `out/`: `labels.json`, `fill_labels.json`, `product_groups.json`,
 `final_predictions.json`, `final_predictions.before_hybrid.json`. Everything else is regenerated.

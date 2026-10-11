@@ -3,7 +3,7 @@
 Writes out/vision_labels.json ({crop path <area_id>/<ts>.jpg: [{description, score}, ...]}). Resumable: images
 already in the file are skipped, and results are saved every batch.
 
-    python src/label_images.py --limit 1000
+    uv run --env-file .env python -m src.label_images --limit 1000
 """
 
 import json
