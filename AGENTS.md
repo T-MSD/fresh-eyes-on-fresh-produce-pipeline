@@ -82,6 +82,26 @@ back to older runs.
 
 Every timestamp a query returns is in UTC; the API sends it as ISO 8601 ending in `Z`.
 
+`GET /cameras/{camera}/frame?at=<ISO 8601 Z>` returns the last frame at or before `at`,
+or the latest frame when omitted, in the latest completed run's dataset. The response is
+`{camera, camera_name, filename, ts, width, height, areas}`. Camera name and dimensions may
+be null. Every camera area is included with `{area_id, number, product_id, product_name,
+corners, prediction}`. Corners are `{top_left, top_right, bottom_right, bottom_left}` pixel
+pairs, including negative coordinates. Prediction is null when missing in the selected
+run, otherwise `{planogram_compliant, detected_product_id, detected_product_name,
+stock_level, stock_value, compliance_confidence, stock_confidence}`. Detected product fields
+and confidence estimates may be null; stock value is derived from stock level.
+
+`GET /images/{camera}/{filename}` serves the stored JPEG from that run's dataset images
+folder, rejecting paths that escape it. `GET /areas/{area_id}/stock` returns an array of
+`{ts, stock_level, stock_value, stock_confidence}` for the area's predictions in that run,
+in timestamp order. A known area without predictions returns `[]`.
+
+These endpoints use `latest_run()` and `get_connection`. Camera, area and product ids are
+external ids scoped to the run's dataset; generated ids are absent from paths and responses.
+No completed run, unknown camera or area, no eligible frame or missing image returns 404.
+Missing predictions never fall back to another run. Invalid or naive `at` returns 422.
+
 Changing any of these shapes is a breaking change for the frontend: update both repos together.
 
 ## Dataset

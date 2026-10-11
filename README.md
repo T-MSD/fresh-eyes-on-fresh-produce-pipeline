@@ -169,23 +169,32 @@ dataset/                                # gitignored
 out/                                    # pipeline outputs (gitignored)
 ```
 
-## Prediction frame metadata
+## Camera view
 
 ```text
-GET /predictions/{frame_id}/{area_id}/frame
-    → most recent run → matching prediction → frame metadata (JSON)
+GET /cameras/{camera}/frame?at=<ISO 8601 Z>
+    → latest completed run → last frame at or before at → areas and predictions
+GET /images/{camera}/{filename}
+    → latest completed run's dataset → stored JPEG
+GET /areas/{area_id}/stock
+    → latest completed run → stock history in timestamp order
 ```
 
-Predictions are identified by frame and area within the automatically selected run.
-This endpoint uses the shared `most_recent_run` dependency and scopes its
-query to that run. The most recent run is ordered by `started_at` descending, then
-`id` descending to break ties, regardless of status. Selection happens on each request.
-A missing run or prediction returns HTTP 404; older runs are never used as a fallback.
+The camera response contains `camera`, `camera_name`, `filename`, `ts`, `width`, `height`
+and `areas`. Omit `at` for the camera's latest frame. An aware timestamp is required when
+`at` is supplied; invalid or naive values return 422. Frame selection uses the selected
+run's dataset, including frames without predictions. Dimensions and camera name may be null.
 
-The response contains `run_id`, `id` (frame ID), `camera_id`, `filename`, `ts`,
-`width` and `height`. Dimensions can be `null`. This endpoint returns metadata;
-it does not read the frame image. Interactive API documentation is available at `/docs`.
+Every area contains `area_id`, `number`, `product_id`, `product_name`, `corners`
+(`top_left`, `top_right`, `bottom_right`, `bottom_left`) and `prediction`, or null when
+that frame has no prediction for the area in the selected run. Corners retain negative
+coordinates. A prediction contains `planogram_compliant`, `detected_product_id`,
+`detected_product_name`, `stock_level`, derived `stock_value`, `compliance_confidence`
+and `stock_confidence`. Unknown detected products and confidence estimates remain null.
 
-`frame_id` is the generated frame ID. `area_id` is the planogram's external area ID
-(for example, `6215_1`), matched within the selected run's dataset. `camera_id` in the
-response is the camera's external ID.
+Stock history is a JSON array of `{ts, stock_level, stock_value, stock_confidence}` for
+the area's predictions in the selected run. A known area without predictions returns `[]`.
+All ids exposed by these endpoints are external ids scoped to the selected run's dataset.
+No completed run, unknown camera or area, or no eligible frame returns 404. There is no
+fallback to older runs. The image endpoint also returns 404 for a missing file or a path
+escaping the dataset image folder. Interactive API documentation is available at `/docs`.

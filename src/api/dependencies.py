@@ -1,25 +1,31 @@
-from collections.abc import Iterator
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from fastapi import Depends, HTTPException
+from sqlalchemy import Connection
 
-from config.db.queries import latest_run_id
+from config.db.connection import get_connection
+from config.db.queries import SelectedRun, StoredFrame, get_latest_run, get_stored_frame
 
-
-def database_session(request: Request) -> Iterator[Session]:
-    with Session(request.app.state.db_bind) as session:
-        yield session
+DatabaseConnection = Annotated[Connection, Depends(get_connection)]
 
 
-DatabaseSession = Annotated[Session, Depends(database_session)]
+def completed_run(connection: DatabaseConnection) -> SelectedRun:
+    run = get_latest_run(connection)
+    if run is None:
+        raise HTTPException(status_code=404, detail="No completed runs available")
+    return run
 
 
-def most_recent_run(session: DatabaseSession) -> int:
-    run_id = latest_run_id(session)
-    if run_id is None:
-        raise HTTPException(status_code=404, detail="No run available")
-    return run_id
+CompletedRun = Annotated[SelectedRun, Depends(completed_run)]
 
 
-MostRecentRun = Annotated[int, Depends(most_recent_run)]
+def stored_frame(
+    camera: str, filename: str, connection: DatabaseConnection, run: CompletedRun
+) -> StoredFrame:
+    frame = get_stored_frame(connection, run, camera, filename)
+    if frame is None:
+        raise HTTPException(status_code=404, detail="Frame not found in the latest completed run")
+    return frame
+
+
+RequestedFrame = Annotated[StoredFrame, Depends(stored_frame)]
