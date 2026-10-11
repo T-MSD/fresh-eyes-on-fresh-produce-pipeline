@@ -270,7 +270,11 @@ per area, 85% exact level and identification +0.96. The manual labels use the ol
 Unreadable frames are recorded in `out/crops/fallbacks.json`. Submission writers include each
 of their planogram areas as compliant and empty; fallbacks have no confidence estimate. The
 crop index contains only readable crops. Planogram parsing accepts `productd` as `product_id`
-and preserves negative corners, with off-image pixels masked by the crop warp.
+and preserves negative corners. The crop warp does not mask pixels that lie outside the image: it
+paints them black, and the models can read that as an empty shelf. This affects the areas whose
+polygon leaves the image (`6383_5`, `6383_6`, `6383_7`, `6386_3`, `6386_4` in the training data).
+Filling them with the mean colour of the visible pixels made the labelled score worse, so the
+black border stays until the models can take a validity mask or be retrained on filled crops.
 
 ### Strategy B, step by step
 
