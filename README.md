@@ -148,29 +148,6 @@ still open at any moment; `closed` is `null` while a task is open. With no compl
 the endpoint returns `404` with `{"detail": "No completed runs available"}`. Interactive API
 documentation is at `/docs`.
 
-`GET /cameras/{camera}/frames/{filename}/areas` returns the frame's planogram areas and
-their predictions from the most recent completed run:
-
-```text
-GET /cameras/6215/frames/1751052241.jpg/areas
-  → run_id, camera_id, filename, ts, areas[]
-  → area_id, number, product_id, product_name, corner coordinates, prediction
-```
-
-The camera is its external id, resolved within the selected run's dataset. The frame is
-identified by that camera and its filename; generated frame ids stay inside the database.
-Areas are ordered by their planogram number. Each prediction includes compliance, stock
-level and its derived stock value, external detected product id, confidence estimates,
-and `is_fallback`. An area without a prediction in the selected run has `prediction: null`;
-older predictions never fill gaps. Missing confidence estimates stay `null` and corner
-coordinates retain negative values. `ts` is a full frame timestamp in UTC (`Z`).
-
-With no completed runs, the endpoint returns `404` with
-`{"detail": "No completed runs available"}`. Unknown cameras and frames in the selected
-run's dataset return `404` with `Camera not found` and `Frame not found`, respectively.
-A frame whose camera has no areas returns an empty `areas` list. The API reads stored
-records and does not need to open the frame image.
-
 ## Layout
 
 ```
@@ -190,3 +167,33 @@ dataset/                                # gitignored
   training/<camera_id>/<unix_ts>.jpg
 out/                                    # pipeline outputs (gitignored)
 ```
+
+## Camera view
+
+```text
+GET /cameras/{camera}/frame?at=<ISO 8601 Z>
+    → latest completed run → last frame at or before at → areas and predictions
+GET /images/{camera}/{filename}
+    → latest completed run's dataset → stored JPEG
+GET /areas/{area_id}/stock
+    → latest completed run → stock history in timestamp order
+```
+
+The camera response contains `camera`, `camera_name`, `filename`, `ts`, `width`, `height`
+and `areas`. Omit `at` for the camera's latest frame. An aware timestamp is required when
+`at` is supplied; invalid or naive values return 422. Frame selection uses the selected
+run's dataset, including frames without predictions. Dimensions and camera name may be null.
+
+Every area contains `area_id`, `number`, `product_id`, `product_name`, `corners`
+(`top_left`, `top_right`, `bottom_right`, `bottom_left`) and `prediction`, or null when
+that frame has no prediction for the area in the selected run. Corners retain negative
+coordinates. A prediction contains `planogram_compliant`, `detected_product_id`,
+`detected_product_name`, `stock_level`, derived `stock_value`, `compliance_confidence`
+and `stock_confidence`. Unknown detected products and confidence estimates remain null.
+
+Stock history is a JSON array of `{ts, stock_level, stock_value, stock_confidence}` for
+the area's predictions in the selected run. A known area without predictions returns `[]`.
+All ids exposed by these endpoints are external ids scoped to the selected run's dataset.
+No completed run, unknown camera or area, or no eligible frame returns 404. There is no
+fallback to older runs. The image endpoint also returns 404 for a missing file or a path
+escaping the dataset image folder. Interactive API documentation is available at `/docs`.

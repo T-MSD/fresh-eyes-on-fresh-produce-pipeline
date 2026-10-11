@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import Connection, Subquery, and_, case, func, select
+from sqlalchemy import Connection, Subquery, case, func, select
 from sqlalchemy.orm import aliased
 
 from config.db.schema import (
     Area,
     Camera,
+    Dataset,
     Frame,
     Prediction,
     Product,
@@ -17,46 +18,6 @@ from config.db.schema import (
 )
 
 TASK_PRIORITY: dict[TaskKind, int] = {"restock": 1, "move_product": 2, "top_up": 3}
-
-
-class CameraNotFound(LookupError):
-    pass
-
-
-class FrameNotFound(LookupError):
-    pass
-
-
-@dataclass(frozen=True)
-class FrameAreaPrediction:
-    planogram_compliant: bool
-    stock_level: StockLevel
-    detected_product_id: str | None
-    compliance_confidence: float | None
-    stock_confidence: float | None
-    is_fallback: bool
-
-
-@dataclass(frozen=True)
-class FrameArea:
-    area_id: str
-    number: int
-    product_id: str
-    product_name: str
-    top_left: tuple[int, int]
-    top_right: tuple[int, int]
-    bottom_right: tuple[int, int]
-    bottom_left: tuple[int, int]
-    prediction: FrameAreaPrediction | None
-
-
-@dataclass(frozen=True)
-class FrameAreas:
-    run_id: int
-    camera_id: str
-    filename: str
-    ts: datetime
-    areas: list[FrameArea]
 
 
 @dataclass(frozen=True)
@@ -98,27 +59,103 @@ def latest_run() -> Subquery:
     )
 
 
-def get_frame_areas(connection: Connection, camera: str, filename: str) -> FrameAreas | None:
-    selected_run = latest_run()
-    run = connection.execute(
-        select(Run.id, Run.dataset_id).join(selected_run, selected_run.c.id == Run.id)
+@dataclass(frozen=True)
+class SelectedRun:
+    id: int
+    dataset_id: int
+
+
+def get_latest_run(connection: Connection) -> SelectedRun | None:
+    latest = latest_run()
+    row = connection.execute(
+        select(Run.id, Run.dataset_id).join(latest, Run.id == latest.c.id)
     ).one_or_none()
-    if run is None:
-        return None
-    camera_id = connection.scalar(
-        select(Camera.id).where(Camera.dataset_id == run.dataset_id, Camera.external_id == camera)
-    )
-    if camera_id is None:
-        raise CameraNotFound
-    frame = connection.execute(
-        select(Frame.id, Frame.filename, Frame.ts).where(
-            Frame.camera_id == camera_id, Frame.filename == filename
+    return SelectedRun(*row) if row is not None else None
+
+
+@dataclass(frozen=True)
+class StoredFrame:
+    id: int
+    camera_id: int
+    camera: str
+    camera_name: str | None
+    filename: str
+    ts: datetime
+    width: int | None
+    height: int | None
+    images_dir: str
+
+
+def get_stored_frame(
+    connection: Connection, run: SelectedRun, camera: str, filename: str
+) -> StoredFrame | None:
+    row = connection.execute(
+        select(
+            Frame.id,
+            Camera.id,
+            Camera.external_id,
+            Camera.name,
+            Frame.filename,
+            Frame.ts,
+            Frame.width,
+            Frame.height,
+            Dataset.images_dir,
+        )
+        .join(Camera, Camera.id == Frame.camera_id)
+        .join(Dataset, Dataset.id == Camera.dataset_id)
+        .where(
+            Camera.dataset_id == run.dataset_id,
+            Camera.external_id == camera,
+            Frame.filename == filename,
         )
     ).one_or_none()
-    if frame is None:
-        raise FrameNotFound
-    detected = aliased(Product)
+    return StoredFrame(*row) if row is not None else None
+
+
+def get_camera_frame(
+    connection: Connection, run: SelectedRun, camera: str, at: datetime | None
+) -> StoredFrame | None:
     statement = (
+        select(Frame.filename)
+        .join(Camera, Camera.id == Frame.camera_id)
+        .where(Camera.dataset_id == run.dataset_id, Camera.external_id == camera)
+        .order_by(Frame.ts.desc(), Frame.filename.desc())
+        .limit(1)
+    )
+    if at is not None:
+        statement = statement.where(Frame.ts <= at)
+    filename = connection.scalar(statement)
+    return get_stored_frame(connection, run, camera, filename) if filename is not None else None
+
+
+@dataclass(frozen=True)
+class AreaPrediction:
+    planogram_compliant: bool
+    stock_level: StockLevel
+    detected_product_id: str | None
+    detected_product_name: str | None
+    compliance_confidence: float | None
+    stock_confidence: float | None
+
+
+@dataclass(frozen=True)
+class CameraFrameArea:
+    area_id: str
+    number: int
+    product_id: str
+    product_name: str
+    top_left: list[int]
+    top_right: list[int]
+    bottom_right: list[int]
+    bottom_left: list[int]
+    prediction: AreaPrediction | None
+
+
+def get_camera_frame_areas(
+    connection: Connection, run: SelectedRun, frame: StoredFrame
+) -> list[CameraFrameArea]:
+    detected = aliased(Product)
+    rows = connection.execute(
         select(
             Area.external_id.label("area_id"),
             Area.number,
@@ -128,54 +165,71 @@ def get_frame_areas(connection: Connection, camera: str, filename: str) -> Frame
             Area.top_right,
             Area.bottom_right,
             Area.bottom_left,
-            Prediction.id.label("prediction_id"),
             Prediction.planogram_compliant,
             Prediction.stock_level,
             detected.external_id.label("detected_product_id"),
+            detected.name.label("detected_product_name"),
             Prediction.compliance_confidence,
             Prediction.stock_confidence,
-            Prediction.is_fallback,
         )
-        .select_from(Area)
         .join(Product, Product.id == Area.product_id)
         .outerjoin(
             Prediction,
-            and_(
-                Prediction.area_id == Area.id,
-                Prediction.frame_id == frame.id,
-                Prediction.run_id == run.id,
-            ),
+            (Prediction.area_id == Area.id)
+            & (Prediction.frame_id == frame.id)
+            & (Prediction.run_id == run.id),
         )
         .outerjoin(detected, detected.id == Prediction.detected_product_id)
-        .where(Area.camera_id == camera_id)
-        .order_by(Area.number)
-    )
-    areas = [
-        FrameArea(
+        .where(Area.camera_id == frame.camera_id, Area.dataset_id == run.dataset_id)
+        .order_by(Area.number, Area.external_id)
+    ).all()
+    return [
+        CameraFrameArea(
             area_id=row.area_id,
             number=row.number,
             product_id=row.product_id,
             product_name=row.product_name,
-            top_left=tuple(row.top_left),
-            top_right=tuple(row.top_right),
-            bottom_right=tuple(row.bottom_right),
-            bottom_left=tuple(row.bottom_left),
-            prediction=FrameAreaPrediction(
+            top_left=row.top_left,
+            top_right=row.top_right,
+            bottom_right=row.bottom_right,
+            bottom_left=row.bottom_left,
+            prediction=AreaPrediction(
                 planogram_compliant=row.planogram_compliant,
                 stock_level=row.stock_level,
                 detected_product_id=row.detected_product_id,
+                detected_product_name=row.detected_product_name,
                 compliance_confidence=row.compliance_confidence,
                 stock_confidence=row.stock_confidence,
-                is_fallback=row.is_fallback,
             )
-            if row.prediction_id is not None
+            if row.stock_level is not None
             else None,
         )
-        for row in connection.execute(statement)
+        for row in rows
     ]
-    return FrameAreas(
-        run_id=run.id, camera_id=camera, filename=frame.filename, ts=frame.ts, areas=areas
+
+
+@dataclass(frozen=True)
+class AreaStock:
+    ts: datetime
+    stock_level: StockLevel
+    stock_confidence: float | None
+
+
+def get_area_stock(
+    connection: Connection, run: SelectedRun, area_id: str
+) -> list[AreaStock] | None:
+    area = connection.scalar(
+        select(Area.id).where(Area.dataset_id == run.dataset_id, Area.external_id == area_id)
     )
+    if area is None:
+        return None
+    rows = connection.execute(
+        select(Frame.ts, Prediction.stock_level, Prediction.stock_confidence)
+        .join(Prediction, Prediction.frame_id == Frame.id)
+        .where(Prediction.area_id == area, Prediction.run_id == run.id)
+        .order_by(Frame.ts, Frame.filename)
+    )
+    return [AreaStock(*row) for row in rows]
 
 
 def get_hour_range(connection: Connection) -> HourRange | None:
