@@ -1,0 +1,754 @@
+{
+ "16429": {
+  "name": "ABACATE HASS PRONTO COMER CNT KG",
+  "group": "B_large",
+  "typical_purchase": "1-2 items",
+  "empty_max_units": 3,
+  "method": "count",
+  "check": false
+ },
+ "23366": {
+  "name": "ABACAXI SUPER SWEET KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "15816": {
+  "name": "ABÓBORA HOKAIDO R0 KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "21254": {
+  "name": "ALFACE FRISADA SACO CNT KG",
+  "group": "B_large",
+  "typical_purchase": "1-2 items",
+  "empty_max_units": 3,
+  "method": "count",
+  "check": false
+ },
+ "31119": {
+  "name": "ALHO SECO CNT 250GR",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "11916": {
+  "name": "ALHO SECO KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "fill",
+  "check": false
+ },
+ "31228": {
+  "name": "ALPERCE CNT CAL. 45/55 KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "11908": {
+  "name": "BANANA CAT I CNT KG",
+  "group": "F_bunch",
+  "typical_purchase": "1 bunch",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "20923": {
+  "name": "BANANA DA MADEIRA CNT KG",
+  "group": "F_bunch",
+  "typical_purchase": "1 bunch",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "15591": {
+  "name": "BANANA PAO CNT KG",
+  "group": "F_bunch",
+  "typical_purchase": "1 bunch",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "22965": {
+  "name": "BATATA ASSAR CNT EMB. 2 KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "22193": {
+  "name": "BATATA BRANCA CNT EMB. 3KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "12661": {
+  "name": "BATATA DOCE CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "22176": {
+  "name": "BATATA ESPECIAL COZER SC EMB. 3KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "21965": {
+  "name": "BATATA VERMELHA CNT EMB. 3KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "11912": {
+  "name": "BATATA VERMELHA CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "15753": {
+  "name": "BATATA VERMELHA EMB:. 5 KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "19454": {
+  "name": "BATATA ZER0%D 4KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "21208": {
+  "name": "BERINGELA CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "22083": {
+  "name": "CEBOLA CNT EMB. 1.5 KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "21915": {
+  "name": "CEBOLA DOCE CNT EMB 1 KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "11914": {
+  "name": "CEBOLA NOVA CNT KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "19127": {
+  "name": "CEBOLA ROXA CNT 1KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "11917": {
+  "name": "CEBOLA ROXA CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "18090": {
+  "name": "CEBOLINHA FRANCESA CNT 500G",
+  "group": "F_bunch",
+  "typical_purchase": "1 bunch",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "3579": {
+  "name": "CEREJA 24+ 500 GR",
+  "group": "E_small_pack",
+  "typical_purchase": "1-2 packs",
+  "empty_max_units": 3,
+  "method": "fill",
+  "check": false
+ },
+ "18329": {
+  "name": "CHUCHU CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "26600": {
+  "name": "CITR ALGARVE IGP LARANJA 3/4/5 1.5 KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "15730": {
+  "name": "CITRINOS ALGARVE IGP LARANJA 6/7/8 3KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "11906": {
+  "name": "CITRINOS DO ALGARVE IGP LARANJA 70/95 KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "12756": {
+  "name": "CLEMENTINA CAL 60/75 CNT KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "21152": {
+  "name": "COUVE BRANCA CNT KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "21178": {
+  "name": "COUVE BROCOLO CNT KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "21114": {
+  "name": "COUVE FLOR CNT KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "15651": {
+  "name": "COUVE PORTUGUESA/PENCA CNT KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "15653": {
+  "name": "COUVE ROXA CNT KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "11893": {
+  "name": "CURGETE VERDE CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "21413": {
+  "name": "FEIJÃO VERDE CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "22411": {
+  "name": "GENGIBRE CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "30368": {
+  "name": "GOIABA CNT KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "25211": {
+  "name": "GRANADILHA 80 G",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "20508": {
+  "name": "KIWI CNT BIO 400 G",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "15781": {
+  "name": "KIWI GOLD ZESPRI 500 G",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "1164": {
+  "name": "KIWI ZESPRI 500 GR",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "14646": {
+  "name": "KIWI ZESPRI KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "fill",
+  "check": false
+ },
+ "11890": {
+  "name": "LIMA CNT KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "11889": {
+  "name": "LIMÃO CNT 60/75 KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "fill",
+  "check": false
+ },
+ "16633": {
+  "name": "MACA FUJI CNT CAL. 73/85 KG IMP",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "11919": {
+  "name": "MACA GRANNY SMITH CNT CAL.73/85 KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "fill",
+  "check": false
+ },
+ "19133": {
+  "name": "MACA PINK LADY CNT CAL.73/80 KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "32170": {
+  "name": "MACA REINETA CNT CAL 70/80 KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "21122": {
+  "name": "MAMAO INTEIRO CNT KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "21789": {
+  "name": "MANGA AVIÃO PALMER KG",
+  "group": "B_large",
+  "typical_purchase": "1-2 items",
+  "empty_max_units": 3,
+  "method": "count",
+  "check": false
+ },
+ "11913": {
+  "name": "MANGA CNT KG",
+  "group": "B_large",
+  "typical_purchase": "1-2 items",
+  "empty_max_units": 3,
+  "method": "count",
+  "check": false
+ },
+ "22108": {
+  "name": "MARACUJA ROXO CNT KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "20818": {
+  "name": "MAÇA FUJI CARIOCA 65/75 1 KG IMP",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "26786": {
+  "name": "MAÇA GOLDEN NACIONAL 75/85 KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "32749": {
+  "name": "MAÇA GOLDEN NACIONAL CAL. 65/70 1 KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "30491": {
+  "name": "MAÇA VERMELHA BIO 500 G",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "32748": {
+  "name": "MAÇÂ GALA CNT 60/70 1 KG IMP",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "32262": {
+  "name": "MAÇÃ COSMIC CRISP 75/85 KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "13702": {
+  "name": "MAÇÃ GALA CNT CAL 70/80 KG IMP",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "16137": {
+  "name": "MELANCIA MINI INTEIRA CNT KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "16143": {
+  "name": "MELANCIA PRETA POUCAS SEMENTES INT KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "15600": {
+  "name": "MELANCIA RISCADA P/ SEMENTES INT CNT KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "16336": {
+  "name": "MELAO VERDE INTEIRO CNT KG",
+  "group": "B_large",
+  "typical_purchase": "1-2 items",
+  "empty_max_units": 3,
+  "method": "count",
+  "check": false
+ },
+ "30633": {
+  "name": "MELOA CANTALUPE/CHARENTAIS INTEIR CNT KG",
+  "group": "B_large",
+  "typical_purchase": "1-2 items",
+  "empty_max_units": 3,
+  "method": "count",
+  "check": false
+ },
+ "11891": {
+  "name": "MELOA GALIA INTEIRA CNT KG",
+  "group": "B_large",
+  "typical_purchase": "1-2 items",
+  "empty_max_units": 3,
+  "method": "count",
+  "check": false
+ },
+ "18533": {
+  "name": "MINI TOMATE CACHO CNT 500G",
+  "group": "F_bunch",
+  "typical_purchase": "1 bunch",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "1156": {
+  "name": "MORANGO EMB. 500 GR",
+  "group": "E_small_pack",
+  "typical_purchase": "1-2 packs",
+  "empty_max_units": 3,
+  "method": "fill",
+  "check": false
+ },
+ "32532": {
+  "name": "NECTARINA R0 A/AA KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "11892": {
+  "name": "PAPAIA DE AVIÃO INTEIRA CNT KG",
+  "group": "A_very_large",
+  "typical_purchase": "1 item",
+  "empty_max_units": 2,
+  "method": "count",
+  "check": false
+ },
+ "11895": {
+  "name": "PEPINO CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "11909": {
+  "name": "PERA CONFERENCE CAL 60/75 CNT KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "11901": {
+  "name": "PERA PACKAMS CNT CAL.65/75 KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "32533": {
+  "name": "PESSEGO PARAGUAYO R0 A/AA/AAA KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "32530": {
+  "name": "PESSEGO R0 A/AA KG",
+  "group": "C_medium_fruit",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "count",
+  "check": false
+ },
+ "11896": {
+  "name": "PIMENTO VERDE CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "11897": {
+  "name": "PIMENTO VERMELHO CNT KG",
+  "group": "D_medium_veg",
+  "typical_purchase": "4-8 items",
+  "empty_max_units": 8,
+  "method": "count",
+  "check": false
+ },
+ "15835": {
+  "name": "PITAYA AMARELA 200G",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "15855": {
+  "name": "PITAYA VERMELHA 300G",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": true
+ },
+ "21120": {
+  "name": "TOMATE CACHO CNT KG",
+  "group": "F_bunch",
+  "typical_purchase": "1 bunch",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "22304": {
+  "name": "TOMATE CHERRY BIO EMB. 250 GR",
+  "group": "E_small_pack",
+  "typical_purchase": "1-2 packs",
+  "empty_max_units": 3,
+  "method": "fill",
+  "check": false
+ },
+ "18254": {
+  "name": "TOMATE CHERRY VERMELHO CNT 250GR",
+  "group": "E_small_pack",
+  "typical_purchase": "1-2 packs",
+  "empty_max_units": 3,
+  "method": "fill",
+  "check": false
+ },
+ "11898": {
+  "name": "TOMATE CHUCHA CNT KG",
+  "group": "H_loose_tomato",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "fill",
+  "check": false
+ },
+ "18514": {
+  "name": "TOMATE CORAÇÃO DE BOI CNT KG",
+  "group": "H_loose_tomato",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "fill",
+  "check": false
+ },
+ "23042": {
+  "name": "TOMATE MINI CHUCHA SWEET SC 200G",
+  "group": "E_small_pack",
+  "typical_purchase": "1-2 packs",
+  "empty_max_units": 3,
+  "method": "fill",
+  "check": false
+ },
+ "21223": {
+  "name": "TOMATE MINI CHUCHA VERMELHO CNT 250GR",
+  "group": "E_small_pack",
+  "typical_purchase": "1-2 packs",
+  "empty_max_units": 3,
+  "method": "fill",
+  "check": false
+ },
+ "21134": {
+  "name": "TOMATE REDONDO CNT KG",
+  "group": "H_loose_tomato",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "fill",
+  "check": false
+ },
+ "1267": {
+  "name": "TOMATE TASTY SC EMB 400G",
+  "group": "E_small_pack",
+  "typical_purchase": "1-2 packs",
+  "empty_max_units": 3,
+  "method": "fill",
+  "check": false
+ },
+ "19959": {
+  "name": "TOMATE ZER0%D 1KG",
+  "group": "H_loose_tomato",
+  "typical_purchase": "4-6 items",
+  "empty_max_units": 6,
+  "method": "fill",
+  "check": false
+ },
+ "21307": {
+  "name": "UVA BRANCA S/ GRAINHA CNT KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "19032": {
+  "name": "UVA BRANCA S/GRAINHA CNT 500 G",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ },
+ "15597": {
+  "name": "UVA RED GLOBE CNT KG",
+  "group": "G_bag",
+  "typical_purchase": "1 bag",
+  "empty_max_units": 2,
+  "method": "fill",
+  "check": false
+ }
+}

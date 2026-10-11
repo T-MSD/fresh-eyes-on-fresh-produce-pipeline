@@ -21,7 +21,11 @@ dependencies = [
 
 [project.optional-dependencies]
 ml = [
+    "google-api-core>=2.42.0",
+    "google-cloud-vision>=3.16.0",
     "open-clip-torch>=3.3.0",
+    "scikit-learn>=1.9.1",
+    "timm>=1.0.30",
     "torch>=2.14.1",
     "torchvision>=0.29.1",
     "transformers>=5.19.0",
@@ -45,9 +49,10 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
 "config/db/migrations/versions/*" = ["E501"]
+"src/*.py" = ["E501"]  # long docstrings and embedded HTML/JS pages in the pipeline scripts
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "typer.Option", "typer.Argument"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -69,3 +74,4 @@ name = "ruff_fix"
 type = "module"
 module = "ruff"
 options = "check --fix REVISION_SCRIPT_FILENAME"
+

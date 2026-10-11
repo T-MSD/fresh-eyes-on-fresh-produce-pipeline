@@ -162,7 +162,7 @@ Changing any of these shapes is a breaking change for the frontend: update both 
 - **Branches** come from `main`: `feat/<short-description>`, `fix/...`, `chore/...`.
 - **PR title** = the first commit message.
 - **Never commit or push without explicit permission.** Never use `--no-verify`.
-- **Never commit** `dataset/`, `out/`, `.env` or `PLAN.md`.
+- **Never commit** `dataset/`, `.env` or `PLAN.md`. Under `out/`, commit only the hand-made inputs and submission candidates listed in the README; everything else in `out/` is regenerated and stays ignored.
 
 ## Docs
 

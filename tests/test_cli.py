@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -95,3 +96,32 @@ def test_reports_every_planogram_problem_and_exits(tmp_path: Path):
     assert result.exit_code == 1
     assert "6215_0" in result.output
     assert "6383_1" in result.output
+
+
+def run_save(*args: str):
+    return CliRunner().invoke(app, ["save-run", *args], env=NO_PATHS)
+
+
+def test_save_run_reports_an_invalid_stock_level_without_a_traceback(tmp_path: Path):
+    predictions = tmp_path / "predictions.json"
+    predictions.write_text(
+        json.dumps(
+            {"6215": {"1.jpg": {"6215_1": {"planogram_compliant": True, "stock_level": "x"}}}}
+        )
+    )
+
+    result = run_save(str(predictions))
+
+    assert result.exit_code == 1
+    assert "6215/1.jpg/6215_1/stock_level" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_save_run_reports_a_file_that_is_not_json(tmp_path: Path):
+    predictions = tmp_path / "predictions.json"
+    predictions.write_text("{")
+
+    result = run_save(str(predictions))
+
+    assert result.exit_code == 1
+    assert "not valid JSON" in result.output
