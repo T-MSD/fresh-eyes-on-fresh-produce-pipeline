@@ -34,3 +34,46 @@ def test_stops_when_model_pt_has_no_saved_class_order(tmp_path):
 
     with pytest.raises(typer.BadParameter, match="class order of model.pt is unknown"):
         check_head_classes(tmp_path, [BANANA])
+
+
+def test_method_metrics_scores_like_the_brief():
+    import numpy as np
+
+    from src.finetune import method_metrics
+
+    metrics = method_metrics(
+        level=np.array([0, 2, 1]),
+        ok=np.array([1, 1, 0]),
+        truth=np.array([0, 1, 2]),
+        true_ok=np.array([1, 0, 0]),
+    )
+
+    assert metrics["stock_points"] == pytest.approx((1 - 3 - 2) / 3)
+    assert metrics["identification_points"] == pytest.approx((1 - 2 + 1) / 3)
+    assert metrics["points_per_area"] == pytest.approx(-4 / 3)
+    assert metrics["exact_stock"] == pytest.approx(1 / 3)
+    assert metrics["half_found"] == [0, 1]
+    assert metrics["confusion"] == {
+        "labels": ["empty", "half", "full"],
+        "rows_truth_columns_predicted": [[1, 0, 0], [0, 0, 1], [0, 1, 0]],
+    }
+
+
+def test_provenance_hashes_each_input_and_records_the_params(tmp_path):
+    import hashlib
+
+    from src.finetune import provenance
+
+    labels = tmp_path / "labels.json"
+    labels.write_text("{}")
+
+    record = provenance({"epochs": 8}, {"labels": labels, "split": None})
+
+    assert record["params"] == {"epochs": 8}
+    assert record["inputs"]["labels"] == {
+        "path": str(labels),
+        "sha256": hashlib.sha256(b"{}").hexdigest(),
+    }
+    assert record["inputs"]["split"] is None
+    assert record["created_at"].endswith("Z")
+    assert "git_sha" in record

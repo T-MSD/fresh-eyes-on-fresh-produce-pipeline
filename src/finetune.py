@@ -4,22 +4,27 @@ Inputs per crop: the image and the product the planogram expects there (a learne
 generic class), because stock and "right product" both depend on it. Outputs: stock level (3
 classes) and planogram_compliant.
 
-  evaluate  (default) holds out whole cameras. Nothing from them is trained on, and the CLIP
-            labels for the other cameras are regenerated from the training cameras' manual labels
-            alone, so no information about the held-out labels leaks in. Scores only the held-out
-            MANUAL labels, next to zero-shot CLIP and the current classifier on the same cameras.
-  --final   regenerates confident labels from out/labels.json and CLIP outputs for every camera,
-            then writes out/finetune/predictions.json, model.pt and the inference bundle
-            out/finetune/bundle.joblib next to it. It does not touch out/predictions.json.
-  --bundle-only  rebuilds bundle.joblib from the current crops index and labels, without training.
-            It stops unless the classes of that index match the ones in out/finetune/classes.json,
-            written next to model.pt.
+  evaluate  (default) trains on the training frames of labels/split.json (python -m src.split_labels)
+            and scores the manual labels of its test frames, next to zero-shot CLIP and the CLIP
+            classifier. Nothing from a test frame is trained on: not its manual labels, CLIP labels
+            or fill labels. Writes out/finetune/metrics.json.
+  --final   trains on every label, ignoring the split, and writes out/finetune/predictions.json,
+            model.pt, the inference bundle bundle.joblib and metadata.json. It does not touch
+            out/predictions.json.
+  --bundle-only  rebuilds bundle.joblib from the current crops index and every label, without
+            training. It stops unless the classes of that index match the ones in
+            out/finetune/classes.json, written next to model.pt.
 
-    uv run --extra ml --env-file .env python -m src.finetune --holdout 6371,6443,6591
+metrics.json and metadata.json record what produced them: params, git commit and the sha256 of the
+label, fill-label and split files.
+
+    uv run --extra ml --env-file .env python -m src.finetune
     uv run --extra ml --env-file .env python -m src.finetune --final
 """
 
+import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
@@ -32,15 +37,18 @@ import typer
 from PIL import Image
 from sklearn.linear_model import Ridge
 
+from config.db.save_run import git_sha
+from src.classifier import features, fit_classifier, fit_proba
 from src.clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class
 from src.prediction_io import merge_fallbacks
-from src.train_classifier import features, fit_classifier, fit_proba
+from src.split_labels import SPLIT, frame_of, load_test_frames
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 WORK = OUT / "finetune"
 BUNDLE = WORK / "bundle.joblib"
 CLASSES = WORK / "classes.json"
+SHIPPED = "average, network 75%"
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
@@ -128,6 +136,45 @@ def build_bundle(items: list[dict], manual: dict, emb: np.ndarray, fill: dict) -
     }
 
 
+def method_metrics(
+    level: np.ndarray, ok: np.ndarray, truth: np.ndarray, true_ok: np.ndarray
+) -> dict:
+    """Per-area points under the brief's scoring, exact stock share and the stock confusion matrix."""
+    stock = float(POINTS[level, truth].mean())
+    identification = float(np.where(np.asarray(ok) == true_ok, 1, -2).mean())
+    half = truth == 1
+    confusion = np.zeros((3, 3), dtype=int)
+    np.add.at(confusion, (truth, level), 1)
+    return {
+        "points_per_area": stock + identification,
+        "stock_points": stock,
+        "identification_points": identification,
+        "exact_stock": float(np.mean(level == truth)),
+        "half_found": [int((level[half] == 1).sum()), int(half.sum())],
+        "confusion": {"labels": list(LEVELS), "rows_truth_columns_predicted": confusion.tolist()},
+    }
+
+
+def repo_path(path: Path) -> str:
+    resolved = path.resolve()
+    return str(resolved.relative_to(ROOT)) if resolved.is_relative_to(ROOT) else str(path)
+
+
+def provenance(params: dict, inputs: dict[str, Path | None]) -> dict:
+    """What produced a model or a score: time, git commit, params and the sha256 of each input file."""
+    return {
+        "created_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "git_sha": git_sha(),
+        "params": params,
+        "inputs": {
+            name: None
+            if path is None
+            else {"path": repo_path(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+            for name, path in inputs.items()
+        },
+    }
+
+
 def head_classes(items: list[dict]) -> list[str]:
     return sorted({product_class(i["product_name"]) for i in items})
 
@@ -155,16 +202,19 @@ def load_fill_labels(out_dir: Path = OUT) -> dict:
     }
 
 
-def regenerate_labels(items, manual, train_cams, emb, zs_probs, zero) -> dict:
-    """CLIP labels as before, but fitted on the manual labels of the training cameras only."""
+def regenerate_labels(items, manual, emb, zs_probs, zero, held=frozenset()) -> dict:
+    """Training labels: manual where labelled, else the CLIP classifier fitted on the manual labels.
+
+    Crops of the `held` frames get no label, so nothing about them is trained on.
+    """
     x = features(emb, zs_probs, False)
-    rows = [n for n, i in enumerate(items) if i["key"] in manual and i["camera"] in train_cams]
+    rows = [n for n, i in enumerate(items) if i["key"] in manual]
     y = np.array([LEVELS.index(manual[items[n]["key"]]["stock_level"]) for n in rows])
     p = fit_proba(x[rows], y, x, 3, 0.1)
     labels = {}
     for n, item in enumerate(items):
         k = item["key"]
-        if item["camera"] not in train_cams:
+        if frame_of(k) in held:
             continue
         if k in manual:
             m = manual[k]
@@ -182,7 +232,6 @@ def regenerate_labels(items, manual, train_cams, emb, zs_probs, zero) -> dict:
 
 @app.command()
 def main(
-    holdout: str = "6371,6443,6591",
     final: bool = False,
     bundle_only: bool = False,
     backbone: str = "resnet50.a1_in1k",
@@ -192,9 +241,31 @@ def main(
     manual_weight: float = 3.0,
     seed: int = 0,
     ignore: Path | None = None,
+    split: Path = SPLIT,
     out_dir: Path = OUT,
     pretrained: bool = True,
 ) -> None:
+    params = {
+        "backbone": backbone,
+        "size": size,
+        "epochs": epochs,
+        "batch": batch,
+        "manual_weight": manual_weight,
+        "seed": seed,
+        "pretrained": pretrained,
+        "final": final,
+        "ignore": str(ignore) if ignore else None,
+    }
+    evaluate = not (final or bundle_only)
+    if evaluate and not split.exists():
+        raise typer.BadParameter(
+            f"{split} is missing: run python -m src.split_labels once, then evaluate"
+        )
+    inputs = {
+        "labels": out_dir / "labels.json",
+        "fill_labels": out_dir / "fill_labels.json",
+        "split": split if evaluate else None,
+    }
     torch.manual_seed(seed)
     np.random.seed(seed)
     work_dir = out_dir / "finetune"
@@ -206,19 +277,16 @@ def main(
     # --ignore keys.json: drop these manual labels from TRAINING only (the test still scores them),
     # to measure what a batch of labels added.
     dropped = set(json.loads(ignore.read_text())) if ignore else set()
-    manual_train = {k: v for k, v in manual.items() if k not in dropped}
+    held = load_test_frames(split) if evaluate else set()
+    manual_fit = {k: v for k, v in manual.items() if frame_of(k) not in held}
+    manual_train = {k: v for k, v in manual_fit.items() if k not in dropped}
+    fill = {k: v for k, v in load_fill_labels(out_dir).items() if frame_of(k) not in held}
     if bundle_only:
         check_head_classes(work_dir, items)
-        joblib.dump(
-            build_bundle(items, manual, emb, load_fill_labels(out_dir)), work_dir / BUNDLE.name
-        )
+        joblib.dump(build_bundle(items, manual_fit, emb, fill), work_dir / BUNDLE.name)
         typer.echo(f"wrote {work_dir / BUNDLE.name}")
         return
-    cams = sorted({i["camera"] for i in items})
-    test_cams = set() if final else set(holdout.split(","))
-    train_cams = set(cams) - test_cams
-
-    labels = regenerate_labels(items, manual_train, train_cams, emb, zs_probs, zero)
+    labels = regenerate_labels(items, manual_train, emb, zs_probs, zero, held)
 
     classes = head_classes(items)
     cls = torch.tensor([classes.index(product_class(i["product_name"])) for i in items])
@@ -233,7 +301,7 @@ def main(
     n_manual = sum(labels[items[n]["key"]][2] == "manual" for n in train_idx)
     typer.echo(
         f"training on {len(train_idx)} confident labels ({n_manual} manual, "
-        f"{len(train_idx) - n_manual} clip); held-out cameras: {sorted(test_cams) or 'none'}"
+        f"{len(train_idx) - n_manual} clip); held-out frames: {len(held)}"
     )
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -252,7 +320,7 @@ def main(
         opt, max_lr=[1e-4, 1e-3], total_steps=steps, pct_start=0.15
     )
 
-    test_idx = [n for n, i in enumerate(items) if i["camera"] in test_cams and i["key"] in manual]
+    test_idx = [n for n, i in enumerate(items) if i["key"] in manual and frame_of(i["key"]) in held]
     for epoch in range(epochs):
         model.train()
         perm = torch.randperm(len(train_idx))
@@ -307,12 +375,19 @@ def main(
         np.save(work_dir / "ok_probs.npy", p_ok)
         torch.save(model.state_dict(), work_dir / "model.pt")
         (work_dir / CLASSES.name).write_text(json.dumps(classes))
-        joblib.dump(
-            build_bundle(items, manual, emb, load_fill_labels(out_dir)), work_dir / BUNDLE.name
-        )
+        joblib.dump(build_bundle(items, manual_fit, emb, fill), work_dir / BUNDLE.name)
+        metadata = provenance(params, inputs) | {
+            "trained_on": {
+                "labels": len(train_idx),
+                "manual": n_manual,
+                "clip": len(train_idx) - n_manual,
+                "test_frames_excluded": len(held),
+            }
+        }
+        (work_dir / "metadata.json").write_text(json.dumps(metadata, indent=1))
         typer.echo(
-            f"wrote out/finetune/predictions.json, model.pt and bundle.joblib for {len(items)} areas "
-            "(out/predictions.json untouched)"
+            f"wrote out/finetune/predictions.json, model.pt, bundle.joblib and metadata.json for "
+            f"{len(items)} areas (out/predictions.json untouched)"
         )
         return
 
@@ -322,24 +397,24 @@ def main(
     p_stock, p_ok = predict(model, imgs[test_idx], cls[test_idx], device)
     keys = [items[n]["key"] for n in test_idx]
 
+    methods: dict[str, dict] = {}
+
     def report(name, level, ok):
-        pts = POINTS[level, truth].mean()
-        ident = np.where(np.asarray(ok) == true_ok, 1, -2).mean()
-        half = truth == 1
+        m = methods[name] = method_metrics(level, np.asarray(ok), truth, true_ok)
+        found, halves = m["half_found"]
         typer.echo(
-            f"  {name:28} stock {pts:+.2f}  exact {np.mean(level == truth):4.0%}  "
-            f"half found {int((level[half] == 1).sum())}/{int(half.sum())}  identification {ident:+.2f}"
+            f"  {name:28} stock {m['stock_points']:+.2f}  exact {m['exact_stock']:4.0%}  "
+            f"half found {found}/{halves}  identification {m['identification_points']:+.2f}"
         )
 
     typer.echo(
-        f"\nheld-out cameras {sorted(test_cams)}: {len(test_idx)} manual labels "
+        f"\nheld out ({len(held)} frames): "
+        f"{len(test_idx)} manual labels "
         f"(stock empty/half/full {np.bincount(truth, minlength=3).tolist()}, wrong product {int((true_ok == 0).sum())})"
     )
     zl = np.array([LEVELS.index(zero[k]["stock_level"]) for k in keys])
     zo = np.array([int(zero[k]["planogram_compliant"]) for k in keys])
-    rows = [
-        n for n, i in enumerate(items) if i["key"] in manual_train and i["camera"] in train_cams
-    ]
+    rows = [n for n, i in enumerate(items) if i["key"] in manual_train]
     xs = features(emb, zs_probs, False)
     y_tr = np.array([LEVELS.index(manual_train[items[n]["key"]]["stock_level"]) for n in rows])
     p_lr = fit_proba(xs[rows], y_tr, xs[test_idx], 3, 0.1)
@@ -350,6 +425,22 @@ def main(
     for w in (0.25, 0.5, 0.75):  # average the two models' stock probabilities, w = network's share
         blend = w * p_stock + (1 - w) * p_lr
         report(f"average, network {w:.0%}", (blend @ POINTS.T).argmax(1), zo)
+
+    metrics = provenance(params, inputs) | {
+        "test_set": {
+            "frames": len(held),
+            "areas": len(test_idx),
+            "stock_empty_half_full": np.bincount(truth, minlength=3).tolist(),
+            "wrong_product": int((true_ok == 0).sum()),
+        },
+        "shipped": SHIPPED,
+        "methods": methods,
+    }
+    (work_dir / "metrics.json").write_text(json.dumps(metrics, indent=1))
+    typer.echo(
+        f"\n{SHIPPED} (shipped, before the fill rule): "
+        f"{methods[SHIPPED]['points_per_area']:+.2f} points per area; wrote {work_dir / 'metrics.json'}"
+    )
 
 
 if __name__ == "__main__":

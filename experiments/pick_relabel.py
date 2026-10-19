@@ -6,7 +6,7 @@ recorded, so the crops in those bands have to be found by looking again. The que
 "half" label (the first band is among them), every "unsure" label, and the "full" labels that
 CLIP finds least full (a weak hint for the second band). No model is trained.
 
-    uv run --env-file .env python -m src.pick_relabel [--full 40]
+    uv run --env-file .env python -m experiments.pick_relabel [--full 40]
 """
 
 import json

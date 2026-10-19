@@ -241,7 +241,7 @@ def main(
 
     import joblib
 
-    from src.train_classifier import proba_of
+    from src.classifier import proba_of
 
     bundle = joblib.load(BUNDLE)
 

@@ -4,7 +4,7 @@ OWL-ViT v2 with the prompt "a photo of a <noun>", confident boxes only (score >=
 that touch the crop border and are much smaller than the typical item dropped (they are pieces of the
 neighbouring tray). Checked by hand on 24 crops: 54% exact, 75% within one item. Resumable.
 
-    uv run --env-file .env python -m src.owl_count
+    uv run --env-file .env python -m experiments.owl_count
 """
 
 import json

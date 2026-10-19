@@ -50,6 +50,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.per-file-ignores]
 "config/db/migrations/versions/*" = ["E501"]
 "src/*.py" = ["E501"]  # long docstrings and embedded HTML/JS pages in the pipeline scripts
+"experiments/*.py" = ["E501"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "typer.Option", "typer.Argument"]

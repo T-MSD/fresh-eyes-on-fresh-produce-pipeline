@@ -89,9 +89,7 @@ def test_final_labels_regenerate_for_all_cameras_with_manual_precedence():
     }
     zero = {item["key"]: {"planogram_compliant": True} for item in items}
     embedding = np.array([[-1.0, 0], [1.0, 0], [0, 1.0], [1.0, 0]])
-    labels = regenerate_labels(
-        items, manual, {item["camera"] for item in items}, embedding, np.ones((4, 3)), zero
-    )
+    labels = regenerate_labels(items, manual, embedding, np.ones((4, 3)), zero)
     assert set(labels) == {item["key"] for item in items}
     assert labels[items[0]["key"]] == (True, "empty", "manual", True)
     assert labels[items[1]["key"]] == (False, "full", "manual", True)
@@ -99,11 +97,26 @@ def test_final_labels_regenerate_for_all_cameras_with_manual_precedence():
     assert labels[items[3]["key"]][2] == "clip"
 
 
-def test_final_training_rebuilds_model_without_labels_all(tmp_path):
+def test_held_out_frames_get_no_training_label():
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")
-    from src.finetune import main
+    from src.finetune import regenerate_labels
 
+    items = [{"key": f"6215/{ts}.jpg/6215_1", "camera": "6215"} for ts in (100, 200, 300)]
+    manual = {
+        items[0]["key"]: {"planogram_compliant": True, "stock_level": "empty"},
+        items[1]["key"]: {"planogram_compliant": True, "stock_level": "full"},
+        items[2]["key"]: {"planogram_compliant": True, "stock_level": "full"},
+    }
+    zero = {item["key"]: {"planogram_compliant": True} for item in items}
+    embedding = np.array([[-1.0, 0], [1.0, 0], [1.0, 0]])
+    labels = regenerate_labels(
+        items, manual, embedding, np.ones((3, 3)), zero, held={"6215/300.jpg"}
+    )
+    assert set(labels) == {items[0]["key"], items[1]["key"]}
+
+
+def write_training_inputs(tmp_path) -> list[dict]:
     crops = tmp_path / "crops"
     crops.mkdir()
     items = []
@@ -130,13 +143,66 @@ def test_final_training_rebuilds_model_without_labels_all(tmp_path):
     (tmp_path / "fill_labels.json").write_text(json.dumps(fill))
     np.savez(tmp_path / "clip_embeddings.npz", embeddings=np.eye(3))
     np.save(tmp_path / "clip_level_probs.npy", np.eye(3))
-    main(final=True, out_dir=tmp_path, backbone="resnet18", pretrained=False, size=64, epochs=1)
+    return items
+
+
+TINY = {"backbone": "resnet18", "pretrained": False, "size": 64, "epochs": 1}
+
+
+def test_final_training_rebuilds_model_without_labels_all(tmp_path):
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")
+    from src.finetune import main
+
+    items = write_training_inputs(tmp_path)
+    main(final=True, out_dir=tmp_path, **TINY)
     assert not (tmp_path / "labels_all.json").exists()
     assert (tmp_path / "finetune" / "model.pt").stat().st_size > 0
     assert (tmp_path / "finetune" / "bundle.joblib").stat().st_size > 0
     assert json.loads((tmp_path / "finetune" / "classes.json").read_text()) == ["bananas"]
     predictions = json.loads((tmp_path / "finetune" / "predictions.json").read_text())
     assert set(predictions["6215"]) == {item["image"] for item in items}
+
+
+def test_final_training_uses_every_label_even_with_a_split(tmp_path):
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")
+    from src.finetune import main
+
+    write_training_inputs(tmp_path)
+    split = tmp_path / "split.json"
+    split.write_text(json.dumps({"test_frames": ["6215/102.jpg"]}))
+    main(final=True, split=split, out_dir=tmp_path, **TINY)
+    metadata = json.loads((tmp_path / "finetune" / "metadata.json").read_text())
+    assert metadata["trained_on"]["manual"] == 3
+    assert metadata["inputs"]["split"] is None
+
+
+def test_evaluation_scores_only_the_split_test_frames(tmp_path):
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")
+    from src.finetune import main
+
+    write_training_inputs(tmp_path)
+    split = tmp_path / "split.json"
+    split.write_text(json.dumps({"test_frames": ["6215/102.jpg"]}))
+    main(split=split, out_dir=tmp_path, **TINY)
+    metrics = json.loads((tmp_path / "finetune" / "metrics.json").read_text())
+    assert metrics["test_set"]["frames"] == 1
+    assert metrics["test_set"]["areas"] == 1
+    assert metrics["test_set"]["stock_empty_half_full"] == [0, 0, 1]
+
+
+def test_evaluation_without_a_split_says_how_to_make_one(tmp_path):
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")
+    import typer
+
+    from src.finetune import main
+
+    write_training_inputs(tmp_path)
+    with pytest.raises(typer.BadParameter, match="src.split_labels"):
+        main(split=tmp_path / "missing.json", out_dir=tmp_path, **TINY)
 
 
 def test_score_accounts_for_wrong_compliance_overstock_understock_and_missing():

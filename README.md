@@ -223,7 +223,11 @@ config/
     schema.py                           # SQLAlchemy models (tables)
     migrations/                         # Alembic env, template and versions
 ingest/                                 # parse and check planogram + images, no database
-src/                                    # pipeline and API
+src/                                    # production pipeline and API
+experiments/                            # finished or rejected experiments, kept for the record
+labels/
+  dev_labels.json                       # hand labels in the organisers' format
+  split.json                            # frozen test frames of the 80/20 split
 tests/
 compose.yaml                            # Postgres container
 dataset/                                # gitignored
@@ -232,40 +236,105 @@ dataset/                                # gitignored
 out/                                    # pipeline outputs (gitignored, except the small files listed below)
 ```
 
-## Stock strategies (10 Oct 2026)
+## Model
 
-Two strategies ship side by side. Compliance is the same in both: the zero-shot CLIP flag.
+### Pipeline
 
-| | Strategy A: blend | Strategy B: purchase rule |
+```
+crop_areas ─► clip_predict ─► review_tool ─► split_labels ─► finetune ─► run_test
+cut areas     embeddings +    hand labels    frozen 80/20    train,        predict
+out of        zero-shot       out/labels.json labels/        evaluate,     new frames
+frames        compliance                      split.json     final model
+```
+
+`src/` holds only this pipeline and the modules it imports. Scripts from finished or rejected
+experiments (strategy B, the hybrid, Google Vision hints, relabel queues, the old scorer) live in
+`experiments/` and run as `python -m experiments.<script>`; nothing in `src/` depends on them.
+
+### Training procedure
+
+1. **Split once.** `python -m src.split_labels` writes `labels/split.json`: per camera, the latest
+   20% of labelled frames are test frames. The split is frozen; it is only rewritten with
+   `--force`, so every score is measured on the same frames.
+2. **Evaluate on the 80/20 split.** `python -m src.finetune` trains on
+   the training frames only (their hand labels, CLIP pseudo-labels and fill labels) and scores
+   every method on the test frames. It writes `out/finetune/metrics.json`.
+3. **Train the shipped model on everything.** `python -m src.finetune --final` retrains with the
+   same settings on all labels, ignoring the split, and writes `model.pt`, `bundle.joblib`, `classes.json` and
+   `metadata.json` to `out/finetune/`. The test score from step 2 is the reported score.
+4. **Predict.** `python -m src.run_test --data-dir <dataset-folder>`.
+
+This is the only evaluation. Test frames are scored, never trained or tuned on. Adding labels does not move a frame into the
+test set; regenerate the split with `--force` only when starting a new evaluation baseline.
+
+`metadata.json` (with the model) and `metrics.json` (with the evaluation) record what produced
+them: time, git commit, every parameter, and the sha256 of `out/labels.json`,
+`out/fill_labels.json` and the split file. Training is seeded (`--seed`, default 0), but the
+network is not deterministic on the Apple GPU (MPS): two runs with the same seed, split and code
+give different network scores. The CLIP and classifier scores are exactly reproducible.
+
+`estimate_score --split labels/split.json` scores a predictions file on the test frames only. The
+shipped model has trained on those frames, so on its predictions this is not a held-out score.
+
+### Model card
+
+| | |
+| --- | --- |
+| Task | Per planogram area: compliance (right product or not) and stock level (empty / half / full) |
+| Input | Perspective-corrected crop of the area plus the product the planogram expects there |
+| Compliance | Zero-shot CLIP: expected product among the top-5 guesses over all store products, or the tray looks empty |
+| Stock level | 75% fine-tuned ResNet50 + 25% logistic regression on CLIP embeddings, level with the best expected points; fill rule raises package trays the fill model reads as >= 65% to full |
+| Training data | Hand labels (`out/labels.json`), weighted 3x, plus CLIP pseudo-labels with confidence >= 0.6; fill percentages (`out/fill_labels.json`) for the fill model |
+| Evaluation | Latest 20% of labelled frames per camera, never trained on |
+| Test score (shipped blend, before the fill rule) | +0.70 to +0.91 points per area over two identical runs: stock −0.24 to −0.02, compliance +0.93; 69-74% exact stock level |
+| Validation estimate | About +200 to +263 on the 289 validation areas (maximum +578) |
+
+Known limits:
+- **Stock is near break-even on unseen frames.** Almost all points come from compliance.
+- **Small test set, noisy training.** A few areas change the score noticeably, and reruns of the
+  network move the shipped score by about 0.2 points per area. The blend weights in `metrics.json`
+  swap order between runs, so the 75% network share is not supported over 50% or the classifier
+  alone.
+- **Off-image areas.** Crop pixels outside the image are painted black, which the models can read as
+  an empty shelf (see Crops).
+- **Old stock rubric.** The hand labels use empty <25%, half 25-75%, full >75%.
+- **The fill rule is not part of the held-out score**: `finetune` scores the blend alone.
+
+### Steps
+
+Install the vision dependencies with `uv sync --extra ml` and run every step from the repository
+root as `uv run --extra ml --env-file .env python -m <module>`.
+
+| Step | Module | Output |
 | --- | --- | --- |
-| Stock level | 75% fine-tuned network + 25% CLIP classifier, level with the best expected points | "empty" means one typical purchase leaves the tray bare; loose items counted, packages judged by fill |
-| Needs | `out/finetune/model.pt`, `out/labels.json` | product groups, OWL-ViT counts, fill percentages |
-| Output | `out/final_predictions.before_hybrid.json` | `out/purchase_rule_predictions.json` (regenerated, not tracked) |
+| crop every planogram area | `src.crop_areas --data-dir <dataset-folder>` | `out/crops/` |
+| CLIP embeddings and zero-shot predictions | `src.clip_predict --topk 5` | `out/clip_zeroshot.json`, `clip_embeddings.npz`, `clip_level_probs.npy` |
+| hand-label stock and compliance | `src.review_tool serve` | `out/labels.json` |
+| group products by fill or count method | `src.product_groups` | `out/product_groups.json` |
+| hand-label fill percentages | `src.fill_label_page` | `out/check/fill_labelling.html` -> `out/fill_labels.json` |
+| freeze the 80/20 split (once) | `src.split_labels` | `labels/split.json` |
+| evaluate | `src.finetune` | `out/finetune/metrics.json` |
+| train the shipped model | `src.finetune --final` | `out/finetune/` |
+| predict new frames | `src.run_test --data-dir <dataset-folder>` | `out/test/predictions.json` |
 
-**`out/final_predictions.json` is the hybrid:** strategy A plus the strategy B transition rules
-selected from hand judgements. It is the submitted file. On `out/labels.json`, it scores below
-strategy A; see Results and limits.
+Review tool keys: 1/2/3 empty/half/full (saves, next), 4/5/6 the same with wrong product,
+X wrong product and U unsure (press before 1/2/3), Enter accept suggestion, T todo/all.
 
-### Strategy A, step by step
+`finetune` builds its training labels from `out/labels.json` and the CLIP outputs. Manual labels
+take precedence and weigh 3x; unsure manual labels are excluded from training; unlabelled crops get
+the CLIP classifier's level when its confidence is at least 0.6. CLIP guesses are never scored.
 
-Install the vision dependencies with `uv sync --extra ml`. Run modules from the repository root,
-using Python 3.12 and the local `.env`, in this order:
+### Labels
 
-| Step | Command | Output |
-| --- | --- | --- |
-| crop every planogram area | `uv run --extra ml --env-file .env python -m src.crop_areas --data-dir <dataset-folder>` | `out/crops/` |
-| Google Vision labels (optional hint; requires Google credentials) | `uv run --extra ml --env-file .env python -m src.label_images` | `out/vision_labels.json` |
-| CLIP zero-shot predictions | `uv run --extra ml --env-file .env python -m src.clip_predict --topk 5` | `out/clip_zeroshot.json`, `clip_embeddings.npz`, `clip_level_probs.npy` |
-| hand-label in the browser | `uv run --extra ml --env-file .env python -m src.review_tool serve` | `out/labels.json` |
-| classifier on CLIP embeddings | `uv run --extra ml --env-file .env python -m src.train_classifier` | `out/predictions.json` |
-| fine-tuned network (all labels) | `uv run --extra ml --env-file .env python -m src.finetune --final` | `out/finetune/` (`model.pt` and `bundle.joblib` are not tracked) |
+`out/labels.json` is the source of truth for the hand labels; `src.review_tool` writes it after
+every keypress. `labels/dev_labels.json` is the same labels in the organisers' `annotations.json`
+format (`src.review_tool export` writes that format to `out/annotations.json`). The two matched
+label for label on 19 Oct 2026. `dev_labels.json` is never regenerated: after changing a label in
+the review tool, change the same single label in `dev_labels.json`.
 
-`finetune.py --final` regenerates confident training labels from `out/labels.json` and the CLIP
-outputs. Manual labels take precedence; unsure manual labels are excluded from training.
-There is no `labels_all.json` prerequisite. Without `--final`, it holds out the configured
-cameras and scores their hand labels only. The earlier reported run scored +0.49 stock points
-per area, 85% exact level and identification +0.96. The manual labels use the old rubric
-(empty <25%, half 25-75%, full >75%); CLIP guesses are never used for scoring.
+`out/fill_labels.json` holds the fill percentages behind the fill rule, keyed like `labels.json`.
+
+### Crops
 
 Unreadable frames are recorded in `out/crops/fallbacks.json`. Submission writers include each
 of their planogram areas as compliant and empty; fallbacks have no confidence estimate. The
@@ -276,66 +345,6 @@ polygon leaves the image (`6383_5`, `6383_6`, `6383_7`, `6386_3`, `6386_4` in th
 Filling them with the mean colour of the visible pixels made the labelled score worse, so the
 black border stays until the models can take a validity mask or be retrained on filled crops.
 
-### Strategy B, step by step
-
-| Step | Command | Output |
-| --- | --- | --- |
-| group every product by purchase size and method (count or fill) | `uv run --extra ml --env-file .env python -m src.product_groups` | `out/product_groups.json` |
-| count loose items with OWL-ViT v2 | `uv run --extra ml --env-file .env python -m src.owl_count` | `out/owl_counts.json` |
-| label fill percentages in the browser | `uv run --extra ml --env-file .env python -m src.fill_label_page` | `out/check/fill_labelling.html` -> `out/fill_labels.json` |
-| compare cutoff rules on held-out cameras | `uv run --extra ml --env-file .env python -m src.fill_probe` | printed table |
-| build strategy B predictions | `uv run --extra ml --env-file .env python -m src.purchase_rule_predictions` | `out/purchase_rule_predictions.json` |
-| judge where A and B disagree | `uv run --extra ml --env-file .env python -m src.compare_strategies`, then `--score` | `out/check/compare_strategies.html` |
-| keep the selected transition rules | `uv run --extra ml --env-file .env python -m src.hybrid_predictions` | `out/final_predictions.hybrid.json` |
-
-What strategy B does:
-- `product_groups.py` puts each product in a group with a typical purchase and an "empty means N units
-  or fewer" number. Products whose names end in KG are not always loose: three 1 KG apples, `CEBOLA NOVA CNT KG`
-  and all grapes are packaged on the shelf, so a small override list exists.
-- **Count products:** the OWL count turns a tray empty only if strategy A does not already say full.
-  This prevents low counts from overriding a full prediction.
-- **Fill products** (packages, bunches, tomatoes and product overrides): ridge regression on the CLIP
-  embedding, trained on hand-labelled fill percentages in 10% steps. Cutoffs: empty 0-15%,
-  half 16-64%, full 65-100%.
-
-### Results and limits
-
-Score the submitted candidates against `out/labels.json`:
-
-```bash
-uv run --env-file .env python -m src.score_predictions
-```
-
-| Candidate | Total points | Points per labelled area |
-| --- | --- | --- |
-| A, before hybrid | +731 | +1.809406 |
-| Hybrid, after | +682 | +1.688119 |
-| Change | −49 | −0.121287 |
-
-These labels also train strategy A. This is a training-label score, not an estimate of performance
-on unseen frames. It penalizes missing areas and uses the repository's compliance and stock
-penalties. The hybrid regresses against these labels, so the hand judgements below do not
-demonstrate an improvement under this evaluation.
-
-Earlier hand judgements of disagreements under the purchase rule:
-
-| File | Exact stock agreement | Points per crop (project scoring) |
-| --- | --- | --- |
-| A, the blend | 61% | -0.29 |
-| B, purchase rule | 39% | -1.08 |
-| hybrid (submitted) | 79% | +0.22 |
-
-- B alone lost to A. The hybrid takes fill half-to-full, fill empty-to-full and count
-  empty-to-half transitions. Those categories were picked after seeing the judgements, so the
-  +0.22 is not a held-out estimate.
-- Cutoffs 0-34/35-79/80-100 and per-group "N units" exceptions did not beat 0-15/16-64/65-100 on
-  held-out cameras; the differences were inside the noise (about ±0.4 points).
-- Counting failed on packages (YOLO-World found nothing; OWL-ViT was judged unusable by hand on the
-  crops checked) and on dense loose trays such as tomatoes, so those products use fill percentages.
-  OWL-ViT agreed with a hand count exactly on 54% of checked crops, within one item on 75%.
-- The earlier ML experiment ran under Python 3.14. Use the repository's pinned Python 3.12
-  for installation, regression tests and subsequent runs.
-
 ### Run on new images
 
 ```bash
@@ -343,9 +352,9 @@ uv run --extra ml --env-file .env python -m src.run_test --data-dir <dataset-fol
 ```
 
 It crops the new frames, runs CLIP, the saved network and the classifier, blends them, applies the
-one fill rule that survived (a blend "empty/half" becomes "full" when the fill model says >= 65%) and
-writes `out/test/predictions.json`. No training. If every
-frame is unreadable, it writes the complete fallback submission without loading ML artifacts.
+fill rule (a blend "empty/half" becomes "full" when the fill model says >= 65%) and writes
+`out/test/predictions.json`. No training. If every frame is unreadable, it writes the complete
+fallback submission without loading ML artifacts.
 
 It reads only these files, so they are all you need to share (`--selftest` also reads the training
 crops it rebuilds the submission from):
@@ -355,6 +364,7 @@ uv run --extra ml --env-file .env python -m src.finetune --final   # writes out/
   model.pt          network weights
   bundle.joblib     class order of the network head, CLIP standardisation, classifier, fill model
   classes.json      the class order model.pt was trained with
+  metadata.json     what model.pt was trained from
 out/product_groups.json
 ```
 
@@ -364,18 +374,35 @@ training. It stops unless the classes of that index are, in order, the ones in `
 cannot write a bundle that scores the wrong products; a `model.pt` from before `classes.json`
 existed needs `--final` again.
 
-`--selftest` compares against the submitted file using its original crops. The OWL count changes
-are omitted by this runner. A product class the network has not seen is scored by the classifier
-alone and logged as a warning; if all products are unseen, network loading and inference are
-skipped. A product no class rule knows is scored as generic `fresh produce` by the classifier alone
-and counted compliant, with a warning naming it. That generic class takes no part in the class
-comparison that sets compliance for the other areas, so it cannot change their flag.
+A product class the network has not seen is scored by the classifier alone and logged as a
+warning; if all products are unseen, network loading and inference are skipped. A product no class
+rule knows is scored as generic `fresh produce` by the classifier alone and counted compliant, with
+a warning naming it. That generic class takes no part in the class comparison that sets compliance
+for the other areas, so it cannot change their flag.
+
+### Submission
+
+The submitted file, `out/final_predictions.json`, is the hybrid from
+`experiments.hybrid_predictions`: the `run_test` pipeline plus the OWL-ViT count changes judged by
+hand (see `experiments/README.md`). `run_test --selftest` rebuilds it from the training crops and
+matches it everywhere except the areas those count changes touched, because `run_test` does not
+count items. `out/final_predictions.before_hybrid.json` is the blend before any hybrid change: no
+fill rule, no count changes.
+
+Estimate the validation score of a predictions file from the dev labels:
+
+```bash
+uv run --env-file .env python -m src.estimate_score [predictions.json] [--labels labels/dev_labels.json] [--validation-areas 289] [--split labels/split.json]
+```
+
+It prints the brief's scoring table (a missing area counts as a wrong identification and a stock
+level above the real stock), the points per labelled area, and that rate scaled to the validation
+set with a 90% interval from resampling labelled frames. The default input is
+`out/test/predictions.json`. The shipped model trained on every dev label, so this estimate is
+optimistic; the held-out score is the one in `out/finetune/metrics.json`.
 
 Tracked files under `out/`: `labels.json`, `fill_labels.json`, `product_groups.json`,
 `final_predictions.json`, `final_predictions.before_hybrid.json`. Everything else is regenerated.
-
-Review tool keys: 1/2/3 empty/half/full (saves, next), 4/5/6 the same with wrong product,
-X wrong product and U unsure (press before 1/2/3), Enter accept suggestion, T todo/all.
 
 ## Camera view
 

@@ -1,11 +1,11 @@
 """Current submission + only the purchase-rule changes the user judged right (out/final_predictions.hybrid.json).
 
-From the 100 judged disagreements (src/compare_strategies.py): the purchase-rule file was right on
+From the 100 judged disagreements (experiments/compare_strategies.py): the purchase-rule file was right on
 fill-product half->full (18 of 22, all judged), fill empty->full (1 of 1) and counted empty->half
 (4 of 5, all judged). It was wrong on fill empty->half, fill full->half and counted half->empty, so
 those keep the current level. Planogram compliance is copied unchanged.
 
-    uv run --env-file .env python -m src.hybrid_predictions
+    uv run --env-file .env python -m experiments.hybrid_predictions
 """
 
 import copy
