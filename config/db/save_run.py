@@ -167,12 +167,23 @@ def task_kind(stock_level: StockLevel, planogram_compliant: bool) -> TaskKind | 
     return None
 
 
+def steady_kinds(kinds: list[TaskKind | None]) -> list[TaskKind | None]:
+    """`kinds` with each one-frame change that the next frame undoes replaced by the kind before
+    it, so one misread frame neither opens nor closes a task. The first and last kinds stay."""
+    steady = list(kinds)
+    for i in range(1, len(kinds) - 1):
+        if steady[i - 1] == kinds[i + 1] != kinds[i]:
+            steady[i] = steady[i - 1]
+    return steady
+
+
 def derive_tasks(conn: Connection, run_id: int) -> int:
     """Store the tasks of a run without any, from its predictions; returns how many.
 
-    Each area's frames are walked in time order. A task opens on the frame where its problem
-    appears and closes on the first later frame showing a different problem or none; a different
-    problem opens its own task on that frame. Fallback predictions neither open nor close a task.
+    Each area's frames are walked in time order, skipping fallback predictions. A frame whose
+    problem differs from the frames on both sides, when those two agree, takes their problem. A
+    task opens on the frame where its problem appears and closes on the first later frame showing
+    a different problem or none; a different problem opens its own task on that frame.
     """
     if conn.scalar(select(Run.id).where(Run.id == run_id)) is None:
         raise UnusableRun([f"run {run_id} does not exist"])
@@ -192,10 +203,13 @@ def derive_tasks(conn: Connection, run_id: int) -> int:
     ).all()
 
     tasks: list[DerivedTask] = []
-    for area_id, frames in groupby(rows, key=lambda row: row.area_id):
+    for area_id, area_rows in groupby(rows, key=lambda row: row.area_id):
+        frames = list(area_rows)
+        kinds = steady_kinds(
+            [task_kind(row.stock_level, row.planogram_compliant) for row in frames]
+        )
         open_task: DerivedTask | None = None
-        for row in frames:
-            kind = task_kind(row.stock_level, row.planogram_compliant)
+        for row, kind in zip(frames, kinds, strict=True):
             if open_task is not None and open_task.kind == kind:
                 continue
             if open_task is not None:

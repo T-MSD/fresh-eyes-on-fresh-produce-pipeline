@@ -84,6 +84,53 @@ def test_a_different_problem_closes_the_task_and_opens_its_own_on_that_frame(db,
     ]
 
 
+def test_one_frame_without_the_problem_keeps_its_task_open(db, dataset_id):
+    run_id = save_run(
+        db,
+        dataset_id,
+        predictions(label("empty"), label(), label("empty"), label()),
+        method="run_test",
+    )
+
+    assert stored_tasks(db, run_id) == [("6215_1", "restock", "1751052241.jpg", "1751063041.jpg")]
+
+
+def test_one_frame_with_a_problem_between_frames_without_it_opens_no_task(db, dataset_id):
+    run_id = save_run(
+        db,
+        dataset_id,
+        predictions(label(), label("full", False), label(), label()),
+        method="run_test",
+    )
+
+    assert stored_tasks(db, run_id) == []
+
+
+def test_alternating_frames_keep_the_first_frames_state(db, dataset_id):
+    run_id = save_run(
+        db,
+        dataset_id,
+        predictions(label("half"), label(), label("half"), label()),
+        method="run_test",
+    )
+
+    assert stored_tasks(db, run_id) == [("6215_1", "top_up", "1751052241.jpg", "1751063041.jpg")]
+
+
+def test_one_frame_change_is_judged_against_the_nearest_frames_that_are_not_fallbacks(
+    db, dataset_id
+):
+    run_id = save_run(
+        db,
+        dataset_id,
+        predictions(label(), label("half"), label(), label("full")),
+        method="run_test",
+        fallback={("6215", "1751059441.jpg", "6215_1")},
+    )
+
+    assert stored_tasks(db, run_id) == []
+
+
 def test_empty_wins_over_a_wrong_product_and_a_wrong_product_over_half(db, dataset_id):
     run_id = save_run(
         db,
@@ -172,12 +219,15 @@ def test_fallback_predictions_neither_open_nor_close_a_task(db, dataset_id):
 
 def test_backfills_a_run_stored_without_tasks(db, dataset_id):
     run_id = save_run(
-        db, dataset_id, predictions(label(), label("half"), label(), label()), method="run_test"
+        db,
+        dataset_id,
+        predictions(label(), label("half"), label("half"), label()),
+        method="run_test",
     )
     db.execute(delete(Task).where(Task.run_id == run_id))
 
     assert derive_tasks(db, run_id) == 1
-    assert stored_tasks(db, run_id) == [("6215_1", "top_up", "1751055841.jpg", "1751059441.jpg")]
+    assert stored_tasks(db, run_id) == [("6215_1", "top_up", "1751055841.jpg", "1751063041.jpg")]
 
 
 def test_refuses_a_run_that_already_has_tasks(db, dataset_id):
