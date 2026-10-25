@@ -10,6 +10,7 @@ from config.db.load import load_dataset
 from config.db.save_run import (
     SubmissionShape,
     UnusableRun,
+    derive_tasks,
     fallback_keys,
     latest_dataset_id,
     save_run,
@@ -131,6 +132,22 @@ def save_run_command(
     finally:
         engine.dispose()
     typer.echo(f"stored run {run_id} on dataset {target}")
+
+
+@app.command("derive-tasks")
+def derive_tasks_command(
+    run_id: Annotated[int, typer.Argument(help="Run stored without tasks.")],
+) -> None:
+    """Open and close the tasks of a run stored before save-run derived them."""
+    engine = make_engine()
+    try:
+        with engine.begin() as conn:
+            count = derive_tasks(conn, run_id)
+    except UnusableRun as error:
+        fail(error.problems)
+    finally:
+        engine.dispose()
+    typer.echo(f"stored {count} tasks for run {run_id}")
 
 
 def print_dataset(dataset: Dataset) -> None:

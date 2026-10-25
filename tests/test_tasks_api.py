@@ -8,7 +8,7 @@ from sqlalchemy import Connection, Engine, select, text
 
 from config.db.connection import get_connection
 from config.db.queries import get_latest_run, mark_task_done
-from config.db.schema import Base, Task
+from config.db.schema import Task
 from src.api.dependencies import Transaction
 from src.main import create_app
 from tests.assertions import iso
@@ -299,16 +299,6 @@ def test_frontend_origin_can_mark_tasks_done(monkeypatch):
 
     assert response.status_code == 200
     assert "POST" in response.headers["access-control-allow-methods"]
-
-
-@pytest.fixture
-def committed(engine: Engine) -> Iterator[Engine]:
-    try:
-        yield engine
-    finally:
-        tables = ", ".join(table.name for table in Base.metadata.sorted_tables)
-        with engine.begin() as conn:
-            conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
 
 
 def add_committed_task(engine: Engine) -> int:

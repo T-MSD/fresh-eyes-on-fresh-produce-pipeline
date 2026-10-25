@@ -10,6 +10,7 @@ from sqlalchemy import Connection, Engine, text
 from sqlalchemy.engine import URL, make_url
 
 from config.db.connection import get_connection, make_engine
+from config.db.schema import Base
 from src.api import dependencies
 from src.main import app
 from tests.db_builders import add_camera, add_dataset, add_product
@@ -64,6 +65,16 @@ def db(engine: Engine) -> Iterator[Connection]:
         transaction = conn.begin()
         yield conn
         transaction.rollback()
+
+
+@pytest.fixture
+def committed(engine: Engine) -> Iterator[Engine]:
+    try:
+        yield engine
+    finally:
+        tables = ", ".join(table.name for table in Base.metadata.sorted_tables)
+        with engine.begin() as conn:
+            conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
 
 
 @pytest.fixture

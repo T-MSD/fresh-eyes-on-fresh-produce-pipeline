@@ -1,12 +1,14 @@
 import subprocess
 from collections.abc import Collection
+from dataclasses import asdict, dataclass, replace
+from itertools import groupby
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, TypeAdapter
 from sqlalchemy import Connection, func, insert, select
 
-from config.db.schema import Area, Camera, Frame, Prediction, Run, StockLevel
+from config.db.schema import Area, Camera, Frame, Prediction, Run, StockLevel, Task, TaskKind
 from config.db.schema import Dataset as DatasetLoad
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -63,11 +65,13 @@ def save_run(
     params: dict[str, Any] | None = None,
     fallback: Collection[tuple[str, str, str]] = (),
 ) -> int:
-    """Store one run and a prediction for every area of every frame, all or nothing.
+    """Store one run, a prediction for every area of every frame and the run's tasks, all or
+    nothing.
 
     `predictions` is the submission shape (camera -> frame -> area -> label). `fallback` holds the
     (camera, frame, area) triples that are a fallback, not a model answer. A run missing an area,
-    or naming a frame or area the dataset does not have, is refused: a gap costs -5 points.
+    or naming a frame or area the dataset does not have, is refused: a gap costs -5 points. Tasks
+    come from `derive_tasks`.
     """
     parsed = SubmissionShape.validate_python(predictions)
     if not conn.scalar(select(DatasetLoad.id).where(DatasetLoad.id == dataset_id)):
@@ -141,4 +145,79 @@ def save_run(
                 for key, row in rows.items()
             ],
         )
+        derive_tasks(conn, run_id)
     return run_id
+
+
+@dataclass(frozen=True)
+class DerivedTask:
+    area_id: int
+    kind: TaskKind
+    opened_frame_id: int
+    closed_frame_id: int | None = None
+
+
+def task_kind(stock_level: StockLevel, planogram_compliant: bool) -> TaskKind | None:
+    if stock_level == "empty":
+        return "restock"
+    if not planogram_compliant:
+        return "move_product"
+    if stock_level == "half":
+        return "top_up"
+    return None
+
+
+def steady_kinds(kinds: list[TaskKind | None]) -> list[TaskKind | None]:
+    """`kinds` with each one-frame change that the next frame undoes replaced by the kind before
+    it, so one misread frame neither opens nor closes a task. The first and last kinds stay."""
+    steady = list(kinds)
+    for i in range(1, len(kinds) - 1):
+        if steady[i - 1] == kinds[i + 1] != kinds[i]:
+            steady[i] = steady[i - 1]
+    return steady
+
+
+def derive_tasks(conn: Connection, run_id: int) -> int:
+    """Store the tasks of a run without any, from its predictions; returns how many.
+
+    Each area's frames are walked in time order, skipping fallback predictions. A frame whose
+    problem differs from both the previous frame (after this rule) and the next frame, when those
+    two agree, takes their problem. A task opens on the frame where its problem appears and closes
+    on the first later frame showing a different problem or none; a different problem opens its
+    own task on that frame.
+    """
+    if conn.scalar(select(Run.id).where(Run.id == run_id)) is None:
+        raise UnusableRun([f"run {run_id} does not exist"])
+    if conn.scalar(select(Task.id).where(Task.run_id == run_id).limit(1)) is not None:
+        raise UnusableRun([f"run {run_id} already has tasks"])
+
+    rows = conn.execute(
+        select(
+            Prediction.area_id,
+            Prediction.frame_id,
+            Prediction.stock_level,
+            Prediction.planogram_compliant,
+        )
+        .join(Frame, Frame.id == Prediction.frame_id)
+        .where(Prediction.run_id == run_id, Prediction.is_fallback.is_(False))
+        .order_by(Prediction.area_id, Frame.ts, Frame.filename)
+    ).all()
+
+    tasks: list[DerivedTask] = []
+    for area_id, area_rows in groupby(rows, key=lambda row: row.area_id):
+        frames = list(area_rows)
+        kinds = steady_kinds(
+            [task_kind(row.stock_level, row.planogram_compliant) for row in frames]
+        )
+        open_task: DerivedTask | None = None
+        for row, kind in zip(frames, kinds, strict=True):
+            if open_task is not None and open_task.kind == kind:
+                continue
+            if open_task is not None:
+                tasks.append(replace(open_task, closed_frame_id=row.frame_id))
+            open_task = DerivedTask(area_id, kind, row.frame_id) if kind is not None else None
+        if open_task is not None:
+            tasks.append(open_task)
+    if tasks:
+        conn.execute(insert(Task), [{"run_id": run_id, **asdict(task)} for task in tasks])
+    return len(tasks)

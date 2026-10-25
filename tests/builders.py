@@ -28,6 +28,10 @@ def area(
     }
 
 
+def label(level: str = "full", compliant: bool = True) -> dict[str, Any]:
+    return {"planogram_compliant": compliant, "stock_level": level}
+
+
 def planogram_json(
     cameras: dict[str, list[dict[str, Any]]], store: str = "Frutas e Legumes"
 ) -> bytes:
