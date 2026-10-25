@@ -181,9 +181,10 @@ def derive_tasks(conn: Connection, run_id: int) -> int:
     """Store the tasks of a run without any, from its predictions; returns how many.
 
     Each area's frames are walked in time order, skipping fallback predictions. A frame whose
-    problem differs from the frames on both sides, when those two agree, takes their problem. A
-    task opens on the frame where its problem appears and closes on the first later frame showing
-    a different problem or none; a different problem opens its own task on that frame.
+    problem differs from both the previous frame (after this rule) and the next frame, when those
+    two agree, takes their problem. A task opens on the frame where its problem appears and closes
+    on the first later frame showing a different problem or none; a different problem opens its
+    own task on that frame.
     """
     if conn.scalar(select(Run.id).where(Run.id == run_id)) is None:
         raise UnusableRun([f"run {run_id} does not exist"])

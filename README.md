@@ -16,8 +16,9 @@ Run every script as a module through uv, from the repo root: `uv run --env-file 
 ## Run everything
 
 From a fresh clone to a run in the database and the API serving it. The hand-made inputs
-`out/labels.json`, `out/fill_labels.json` and `out/product_groups.json` are tracked; everything
-else under `out/` is rebuilt by these steps.
+`out/labels.json`, `out/fill_labels.json` and `out/product_groups.json` and the submission
+candidates `out/final_predictions.json` and `out/final_predictions.before_hybrid.json` are
+tracked; everything else under `out/` is rebuilt by these steps.
 
 ```bash
 cp .env.example .env                       # then set the Postgres credentials
@@ -45,7 +46,7 @@ changes.
 Other ways to store a run, and to add tasks to a run stored before runs got them:
 
 ```bash
-uv run --env-file .env python cli.py save-run out/final_predictions.json --method hybrid
+uv run --env-file .env python cli.py save-run out/final_predictions.json --method hybrid --fallbacks out/crops/fallbacks.json
 uv run --env-file .env python cli.py derive-tasks <run_id>
 ```
 
@@ -139,7 +140,7 @@ A run is one set of predictions on one dataset load. `run_test --db` stores its 
 ```bash
 uv run --env-file .env python cli.py load <planogram> <images_dir>      # first: the dataset
 uv run --extra ml --env-file .env python -m src.run_test --data-dir <folder> --db  # newest load, or --dataset-id N
-uv run --env-file .env python cli.py save-run out/final_predictions.json --method hybrid
+uv run --env-file .env python cli.py save-run out/final_predictions.json --method hybrid --fallbacks out/crops/fallbacks.json
 uv run --env-file .env python cli.py save-run out/test/predictions.json --fallbacks out/test/crops/fallbacks.json
 ```
 
@@ -152,11 +153,12 @@ frames) are stored with `is_fallback` set: `run_test --db` does this itself, `sa
 
 The same transaction stores the run's tasks. Each area's frames are walked in time order,
 skipping fallback predictions; an area's problem is `empty` (`restock`), else not compliant
-(`move_product`), else `half` (`top_up`). A frame whose problem differs from the frames on both
-sides, when those two agree, takes their problem: one misread frame neither opens nor closes a
-task. A task opens on the frame where its problem appears and closes on the first later frame
-with a different problem or none, where that different problem opens its own task. `cli.py derive-tasks <run_id>` stores the
-tasks of a run saved before this; it refuses a run that already has tasks.
+(`move_product`), else `half` (`top_up`). A frame whose problem differs from both the previous
+frame (after this rule) and the next frame, when those two agree, takes their problem: one
+misread frame neither opens nor closes a task. A task opens on the frame where its problem
+appears and closes on the first later frame with a different problem or none, where that
+different problem opens its own task. `cli.py derive-tasks <run_id>` stores the tasks of a run
+saved before this; it refuses a run that already has tasks.
 
 ## API
 
