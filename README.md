@@ -11,7 +11,7 @@ uv sync                 # core: pipeline + API
 uv sync --extra ml      # adds torch, transformers, open_clip, google-cloud-vision
 ```
 
-Run every script as a module through uv, from the repo root: `uv run --env-file .env python -m src.<script>`.
+Run every script as a module through uv, from the repo root: `uv run --env-file .env python -m src.<domain>.<script>`.
 
 ## Run everything
 
@@ -29,11 +29,11 @@ uv run --env-file .env alembic upgrade head
 
 uv run --env-file .env python cli.py load  # dataset/planogram.json + dataset/training from .env
 
-uv run --env-file .env python -m src.crop_areas --data-dir dataset/training     # out/crops/
-uv run --extra ml --env-file .env python -m src.clip_predict                     # CLIP embeddings and probabilities
-uv run --extra ml --env-file .env python -m src.finetune --final                 # out/finetune/model.pt, bundle.joblib
+uv run --env-file .env python -m src.vision.crop_areas --data-dir dataset/training     # out/crops/
+uv run --extra ml --env-file .env python -m src.vision.clip_predict                     # CLIP embeddings and probabilities
+uv run --extra ml --env-file .env python -m src.vision.finetune --final                 # out/finetune/model.pt, bundle.joblib
 
-uv run --extra ml --env-file .env python -m src.run_test --data-dir dataset/training --db   # stores the run and its tasks
+uv run --extra ml --env-file .env python -m src.prediction.run_test --data-dir dataset/training --db   # stores the run and its tasks
 
 uv run --env-file .env uvicorn src.main:app --host 127.0.0.1 --port 8000        # API at http://127.0.0.1:8000/docs
 ```
@@ -139,7 +139,7 @@ A run is one set of predictions on one dataset load. `run_test --db` stores its 
 
 ```bash
 uv run --env-file .env python cli.py load <planogram> <images_dir>      # first: the dataset
-uv run --extra ml --env-file .env python -m src.run_test --data-dir <folder> --db  # newest load, or --dataset-id N
+uv run --extra ml --env-file .env python -m src.prediction.run_test --data-dir <folder> --db  # newest load, or --dataset-id N
 uv run --env-file .env python cli.py save-run out/final_predictions.json --method hybrid --fallbacks out/crops/fallbacks.json
 uv run --env-file .env python cli.py save-run out/test/predictions.json --fallbacks out/test/crops/fallbacks.json
 ```
@@ -167,8 +167,8 @@ uv run --env-file .env uvicorn src.main:app --reload
 ```
 
 `GET /hour-range` returns the earliest and latest frame timestamps with predictions in the
-most recent completed run. All API record queries must use `config.db.queries.latest_run()`
-to scope records to the newest completed run by `started_at`, breaking ties by the highest `id`.
+most recent completed run. All API record queries must use `src.runs.queries.latest_run()`
+(through `get_latest_run()` or the `CompletedRun` dependency) to scope records to the newest completed run by `started_at`, breaking ties by the highest `id`.
 Only completed (`done`) runs are selected; an empty newest completed run never falls back to
 an older run. Newer `running` or `failed` runs are skipped.
 
@@ -260,16 +260,28 @@ endpoint returns `404` with `{"detail": "No completed runs available"}`.
 
 ## Layout
 
+One package per domain under `src/`; each owns its rules, its queries and its API router
+(`docs/adr/0001-organise-code-by-domain.md`). `config/db/` is shared infrastructure only.
+
 ```
-cli.py                                  # command line: load
+cli.py                                  # command line: load, save-run, derive-tasks
 config/
   db/
     connection.py                       # engine from DATABASE_URL
-    load.py                             # add a dataset load in one transaction
     schema.py                           # SQLAlchemy models (tables)
     migrations/                         # Alembic env, template and versions
-ingest/                                 # parse and check planogram + images, no database
-src/                                    # pipeline and API
+src/
+  main.py                               # FastAPI app: includes each domain's router
+  api/dependencies.py                   # DatabaseConnection, Transaction
+  dataset/                              # parse and check planogram + images; add a dataset load
+  shelf/                                # stock level, stock value, area status rule
+  vision/                               # crops, CLIP, fine-tuned network, OWL-ViT counts
+  labelling/                            # review tool and label queues
+  prediction/                           # submission shape, fallbacks, run_test, strategy B, hybrid
+  scoring/                              # scoring rules against labels
+  runs/                                 # store a run, latest completed run, GET /hour-range
+  tasks/                                # derive tasks, GET /tasks, POST /tasks/done
+  store/                                # camera view and Store page endpoints
 tests/
 compose.yaml                            # Postgres container
 dataset/                                # gitignored
@@ -299,12 +311,12 @@ using Python 3.12 and the local `.env`, in this order:
 
 | Step | Command | Output |
 | --- | --- | --- |
-| crop every planogram area | `uv run --extra ml --env-file .env python -m src.crop_areas --data-dir <dataset-folder>` | `out/crops/` |
-| Google Vision labels (optional hint; requires Google credentials) | `uv run --extra ml --env-file .env python -m src.label_images` | `out/vision_labels.json` |
-| CLIP zero-shot predictions | `uv run --extra ml --env-file .env python -m src.clip_predict --topk 5` | `out/clip_zeroshot.json`, `clip_embeddings.npz`, `clip_level_probs.npy` |
-| hand-label in the browser | `uv run --extra ml --env-file .env python -m src.review_tool serve` | `out/labels.json` |
-| classifier on CLIP embeddings | `uv run --extra ml --env-file .env python -m src.train_classifier` | `out/predictions.json` |
-| fine-tuned network (all labels) | `uv run --extra ml --env-file .env python -m src.finetune --final` | `out/finetune/` (`model.pt` and `bundle.joblib` are not tracked) |
+| crop every planogram area | `uv run --extra ml --env-file .env python -m src.vision.crop_areas --data-dir <dataset-folder>` | `out/crops/` |
+| Google Vision labels (optional hint; requires Google credentials) | `uv run --extra ml --env-file .env python -m src.vision.label_images` | `out/vision_labels.json` |
+| CLIP zero-shot predictions | `uv run --extra ml --env-file .env python -m src.vision.clip_predict --topk 5` | `out/clip_zeroshot.json`, `clip_embeddings.npz`, `clip_level_probs.npy` |
+| hand-label in the browser | `uv run --extra ml --env-file .env python -m src.labelling.review_tool serve` | `out/labels.json` |
+| classifier on CLIP embeddings | `uv run --extra ml --env-file .env python -m src.vision.train_classifier` | `out/predictions.json` |
+| fine-tuned network (all labels) | `uv run --extra ml --env-file .env python -m src.vision.finetune --final` | `out/finetune/` (`model.pt` and `bundle.joblib` are not tracked) |
 
 `finetune.py --final` regenerates confident training labels from `out/labels.json` and the CLIP
 outputs. Manual labels take precedence; unsure manual labels are excluded from training.
@@ -326,13 +338,13 @@ black border stays until the models can take a validity mask or be retrained on 
 
 | Step | Command | Output |
 | --- | --- | --- |
-| group every product by purchase size and method (count or fill) | `uv run --extra ml --env-file .env python -m src.product_groups` | `out/product_groups.json` |
-| count loose items with OWL-ViT v2 | `uv run --extra ml --env-file .env python -m src.owl_count` | `out/owl_counts.json` |
-| label fill percentages in the browser | `uv run --extra ml --env-file .env python -m src.fill_label_page` | `out/check/fill_labelling.html` -> `out/fill_labels.json` |
-| compare cutoff rules on held-out cameras | `uv run --extra ml --env-file .env python -m src.fill_probe` | printed table |
-| build strategy B predictions | `uv run --extra ml --env-file .env python -m src.purchase_rule_predictions` | `out/purchase_rule_predictions.json` |
-| judge where A and B disagree | `uv run --extra ml --env-file .env python -m src.compare_strategies`, then `--score` | `out/check/compare_strategies.html` |
-| keep the selected transition rules | `uv run --extra ml --env-file .env python -m src.hybrid_predictions` | `out/final_predictions.hybrid.json` |
+| group every product by purchase size and method (count or fill) | `uv run --extra ml --env-file .env python -m src.prediction.product_groups` | `out/product_groups.json` |
+| count loose items with OWL-ViT v2 | `uv run --extra ml --env-file .env python -m src.vision.owl_count` | `out/owl_counts.json` |
+| label fill percentages in the browser | `uv run --extra ml --env-file .env python -m src.labelling.fill_label_page` | `out/check/fill_labelling.html` -> `out/fill_labels.json` |
+| compare cutoff rules on held-out cameras | `uv run --extra ml --env-file .env python -m src.vision.fill_probe` | printed table |
+| build strategy B predictions | `uv run --extra ml --env-file .env python -m src.prediction.purchase_rule_predictions` | `out/purchase_rule_predictions.json` |
+| judge where A and B disagree | `uv run --extra ml --env-file .env python -m src.labelling.compare_strategies`, then `--score` | `out/check/compare_strategies.html` |
+| keep the selected transition rules | `uv run --extra ml --env-file .env python -m src.prediction.hybrid_predictions` | `out/final_predictions.hybrid.json` |
 
 What strategy B does:
 - `product_groups.py` puts each product in a group with a typical purchase and an "empty means N units
@@ -349,7 +361,7 @@ What strategy B does:
 Score the submitted candidates against `out/labels.json`:
 
 ```bash
-uv run --env-file .env python -m src.score_predictions
+uv run --env-file .env python -m src.scoring.score_predictions
 ```
 
 | Candidate | Total points | Points per labelled area |
@@ -385,7 +397,7 @@ Earlier hand judgements of disagreements under the purchase rule:
 ### Run on new images
 
 ```bash
-uv run --extra ml --env-file .env python -m src.run_test --data-dir <dataset-folder>
+uv run --extra ml --env-file .env python -m src.prediction.run_test --data-dir <dataset-folder>
 ```
 
 It crops the new frames, runs CLIP, the saved network and the classifier, blends them, applies the
@@ -397,14 +409,14 @@ It reads only these files, so they are all you need to share (`--selftest` also 
 crops it rebuilds the submission from):
 
 ```
-uv run --extra ml --env-file .env python -m src.finetune --final   # writes out/finetune/
+uv run --extra ml --env-file .env python -m src.vision.finetune --final   # writes out/finetune/
   model.pt          network weights
   bundle.joblib     class order of the network head, CLIP standardisation, classifier, fill model
   classes.json      the class order model.pt was trained with
 out/product_groups.json
 ```
 
-`model.pt` is only valid with the bundle written next to it. `python -m src.finetune --bundle-only`
+`model.pt` is only valid with the bundle written next to it. `python -m src.vision.finetune --bundle-only`
 rebuilds the bundle from `out/crops/index.json`, `out/labels.json` and `out/fill_labels.json` without
 training. It stops unless the classes of that index are, in order, the ones in `classes.json`, so it
 cannot write a bundle that scores the wrong products; a `model.pt` from before `classes.json`

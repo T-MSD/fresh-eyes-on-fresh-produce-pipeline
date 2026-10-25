@@ -19,11 +19,10 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-StockLevel = Literal["empty", "half", "full"]
-RunStatus = Literal["running", "done", "failed"]
-TaskKind = Literal["restock", "move_product", "top_up"]
+from src.shelf.status import STOCK_VALUES, StockLevel
+from src.tasks.kind import TaskKind
 
-STOCK_VALUES: dict[StockLevel, float] = {"empty": 0.0, "half": 0.5, "full": 1.0}
+RunStatus = Literal["running", "done", "failed"]
 CORNERS = ("top_left", "top_right", "bottom_right", "bottom_left")
 
 

@@ -6,10 +6,10 @@ from sqlalchemy import Engine, delete, select
 from typer.testing import CliRunner
 
 from cli import app
-from config.db.load import load_dataset
-from config.db.save_run import save_run
 from config.db.schema import Task
-from ingest.dataset import read_dataset
+from src.dataset.load import load_dataset
+from src.dataset.read import read_dataset
+from src.runs.save import save_run
 from tests.builders import area, label, write_dataset, write_frame_bytes
 
 NO_PATHS = {"PLANOGRAM_PATH": None, "IMAGES_DIR": None}

@@ -5,10 +5,10 @@ import pytest
 from sqlalchemy import Connection, func, insert, select
 from sqlalchemy.exc import IntegrityError
 
-from config.db.load import load_dataset
 from config.db.schema import Area, Camera, Frame, Prediction, Product, Run
 from config.db.schema import Dataset as DatasetLoad
-from ingest.dataset import Dataset, read_dataset
+from src.dataset.load import load_dataset
+from src.dataset.read import Dataset, read_dataset
 from tests.builders import area, write_dataset
 
 

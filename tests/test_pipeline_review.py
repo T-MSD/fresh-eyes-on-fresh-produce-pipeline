@@ -3,7 +3,7 @@ import json
 import numpy as np
 import pytest
 
-from src.crop_areas import main as crop
+from src.vision.crop_areas import main as crop
 from tests.builders import area, encode, write_dataset, write_frame_bytes
 
 
@@ -42,8 +42,8 @@ def test_unreadable_frame_gets_every_area_as_fallback(tmp_path, readable):
 
 
 def test_all_unseen_products_keep_classifier_without_loading_model(tmp_path):
-    from src.prediction_io import NetworkCrop
-    from src.run_test import blend_network
+    from src.prediction.run_test import blend_network
+    from src.prediction.submission import NetworkCrop
 
     probabilities = np.array([[0.2, 0.3, 0.5]])
     result = blend_network(
@@ -56,7 +56,7 @@ def test_all_unseen_products_keep_classifier_without_loading_model(tmp_path):
 
 
 def test_new_unreadable_frames_produce_complete_submission_without_training_artifacts(tmp_path):
-    from src.run_test import main
+    from src.prediction.run_test import main
 
     _, images = write_dataset(
         tmp_path / "data", {"6215": [area("6215_1"), area("6215_2")]}, {"6215": []}
@@ -72,7 +72,7 @@ def test_new_unreadable_frames_produce_complete_submission_without_training_arti
 def test_final_labels_regenerate_for_all_cameras_with_manual_precedence():
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")
-    from src.finetune import regenerate_labels
+    from src.vision.finetune import regenerate_labels
 
     items = [
         {"key": f"{camera}/100.jpg/{camera}_1", "camera": camera}
@@ -102,7 +102,7 @@ def test_final_labels_regenerate_for_all_cameras_with_manual_precedence():
 def test_final_training_rebuilds_model_without_labels_all(tmp_path):
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")
-    from src.finetune import main
+    from src.vision.finetune import main
 
     crops = tmp_path / "crops"
     crops.mkdir()
@@ -140,7 +140,8 @@ def test_final_training_rebuilds_model_without_labels_all(tmp_path):
 
 
 def test_score_accounts_for_wrong_compliance_overstock_understock_and_missing():
-    from src.prediction_io import Label, score_submission
+    from src.prediction.submission import Label
+    from src.scoring.score import score_submission
 
     labels = {
         "6215/100.jpg/6215_1": Label(planogram_compliant=True, stock_level="empty"),
@@ -159,7 +160,7 @@ def test_score_accounts_for_wrong_compliance_overstock_understock_and_missing():
 
 
 def test_merge_fallbacks_preserves_valid_predictions(tmp_path):
-    from src.prediction_io import merge_fallbacks
+    from src.prediction.submission import merge_fallbacks
 
     label = {"planogram_compliant": True, "stock_level": "empty", "stock_value": 0}
     (tmp_path / "fallbacks.json").write_text(
