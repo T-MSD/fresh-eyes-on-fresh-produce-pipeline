@@ -2,8 +2,8 @@ import json
 
 import pytest
 
-from ingest.errors import InvalidInput
-from ingest.planogram import Corners, PlanogramArea, PlanogramProduct, parse_planogram
+from src.dataset.errors import InvalidInput
+from src.dataset.planogram import Corners, PlanogramArea, PlanogramProduct, parse_planogram
 from tests.builders import area, planogram_json
 
 

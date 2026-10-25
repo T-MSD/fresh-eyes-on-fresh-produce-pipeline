@@ -26,9 +26,9 @@ def write_bundle(out: Path) -> None:
     import joblib
     import torch
 
-    from src import run_test
-    from src.clip_predict import LEVELS
-    from src.finetune import Net, build_bundle
+    from src.prediction import run_test
+    from src.vision.clip_predict import LEVELS
+    from src.vision.finetune import Net, build_bundle
 
     rng = np.random.default_rng(0)
     items = train_items()
@@ -53,7 +53,7 @@ def write_dataset(root: Path, names: list[str]) -> None:
 
 @pytest.fixture
 def isolated_out(tmp_path, monkeypatch):
-    from src import run_test
+    from src.prediction import run_test
 
     out = tmp_path / "out"
     out.mkdir()
@@ -64,7 +64,7 @@ def isolated_out(tmp_path, monkeypatch):
 
 
 def run(data_dir: Path, out: Path) -> dict:
-    from src import run_test
+    from src.prediction import run_test
 
     out_file = out / "test" / "predictions.json"
     run_test.main(
@@ -115,7 +115,7 @@ def test_every_class_unseen_keeps_the_classifier_prediction_instead_of_crashing(
 def test_a_product_no_class_rule_matches_is_compliant_and_named_in_a_warning(
     tmp_path, isolated_out, capsys
 ):
-    from src.clip_predict import product_class
+    from src.vision.clip_predict import product_class
 
     with pytest.raises(ValueError):
         product_class(NO_RULE_NAME)
@@ -132,7 +132,7 @@ def test_a_product_no_class_rule_matches_is_compliant_and_named_in_a_warning(
 def test_the_generic_class_is_never_one_of_the_classes_known_areas_compete_in(
     tmp_path, isolated_out, monkeypatch
 ):
-    from src import run_test
+    from src.prediction import run_test
 
     seen: list[list[str]] = []
     real = run_test.clip_zeroshot

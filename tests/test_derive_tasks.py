@@ -3,11 +3,14 @@ from pathlib import Path
 import pytest
 from sqlalchemy import Connection, delete, select
 
-from config.db.load import load_dataset
-from config.db.queries import SelectedRun, get_predictions
-from config.db.save_run import UnusableRun, derive_tasks, save_run
 from config.db.schema import Area, Frame, Task
-from ingest.dataset import read_dataset
+from src.dataset.load import load_dataset
+from src.dataset.read import read_dataset
+from src.runs.errors import UnusableRun
+from src.runs.queries import SelectedRun
+from src.runs.save import save_run
+from src.store.queries import get_predictions
+from src.tasks.derive import derive_tasks
 from tests.builders import area, label, write_dataset
 
 TIMES = [1751052241, 1751055841, 1751059441, 1751063041]

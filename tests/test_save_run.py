@@ -5,10 +5,12 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import Connection, select
 
-from config.db.load import load_dataset
-from config.db.save_run import UnusableRun, fallback_keys, latest_dataset_id, save_run
 from config.db.schema import Prediction, Run
-from ingest.dataset import read_dataset
+from src.dataset.load import load_dataset
+from src.dataset.read import read_dataset
+from src.prediction.submission import fallback_keys
+from src.runs.errors import UnusableRun
+from src.runs.save import latest_dataset_id, save_run
 from tests.builders import area, label, write_dataset
 
 

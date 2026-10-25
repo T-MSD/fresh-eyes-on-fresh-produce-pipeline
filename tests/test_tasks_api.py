@@ -7,10 +7,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Connection, Engine, select, text
 
 from config.db.connection import get_connection
-from config.db.queries import get_latest_run, mark_task_done
 from config.db.schema import Task
 from src.api.dependencies import Transaction
 from src.main import create_app
+from src.runs.queries import get_latest_run
+from src.tasks.queries import mark_task_done
 from tests.assertions import iso
 from tests.db_builders import (
     add_area,

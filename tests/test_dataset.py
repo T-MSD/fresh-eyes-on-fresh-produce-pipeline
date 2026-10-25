@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from ingest.dataset import read_dataset
-from ingest.errors import InvalidInput
+from src.dataset.errors import InvalidInput
+from src.dataset.read import read_dataset
 from tests.builders import area, write_dataset
 
 

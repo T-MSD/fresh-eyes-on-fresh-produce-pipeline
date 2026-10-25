@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from ingest.frames import FrameFile, scan_frames
+from src.dataset.frames import FrameFile, scan_frames
 from tests.builders import declare_size, encode, orient, write_frame, write_frame_bytes
 
 

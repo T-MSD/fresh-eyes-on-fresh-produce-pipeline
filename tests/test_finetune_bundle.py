@@ -13,7 +13,7 @@ LEMON = {"product_name": "LIMAO CNT KG"}
 
 
 def test_accepts_the_classes_model_pt_was_trained_with(tmp_path):
-    from src.finetune import check_head_classes
+    from src.vision.finetune import check_head_classes
 
     (tmp_path / "classes.json").write_text(json.dumps(["bananas", "pears"]))
 
@@ -21,7 +21,7 @@ def test_accepts_the_classes_model_pt_was_trained_with(tmp_path):
 
 
 def test_stops_when_the_classes_changed_even_if_their_number_did_not(tmp_path):
-    from src.finetune import check_head_classes
+    from src.vision.finetune import check_head_classes
 
     (tmp_path / "classes.json").write_text(json.dumps(["bananas", "pears"]))
 
@@ -30,7 +30,7 @@ def test_stops_when_the_classes_changed_even_if_their_number_did_not(tmp_path):
 
 
 def test_stops_when_model_pt_has_no_saved_class_order(tmp_path):
-    from src.finetune import check_head_classes
+    from src.vision.finetune import check_head_classes
 
     with pytest.raises(typer.BadParameter, match="class order of model.pt is unknown"):
         check_head_classes(tmp_path, [BANANA])

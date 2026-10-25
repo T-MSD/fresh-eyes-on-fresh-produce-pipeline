@@ -6,17 +6,13 @@ import typer
 from pydantic import ValidationError
 
 from config.db.connection import make_engine
-from config.db.load import load_dataset
-from config.db.save_run import (
-    SubmissionShape,
-    UnusableRun,
-    derive_tasks,
-    fallback_keys,
-    latest_dataset_id,
-    save_run,
-)
-from ingest.dataset import Dataset, read_dataset
-from ingest.errors import InvalidInput
+from src.dataset.errors import InvalidInput
+from src.dataset.load import load_dataset
+from src.dataset.read import Dataset, read_dataset
+from src.prediction.submission import SUBMISSION, fallback_keys
+from src.runs.errors import UnusableRun
+from src.runs.save import latest_dataset_id, save_run
+from src.tasks.derive import derive_tasks
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -109,7 +105,7 @@ def save_run_command(
     """Store a predictions file as a run on a loaded dataset."""
     try:
         raw = json.loads(predictions.read_text())
-        SubmissionShape.validate_python(raw)
+        SUBMISSION.validate_python(raw)
         fallback = fallback_keys(fallbacks) if fallbacks else set()
     except json.JSONDecodeError as error:
         fail([f"not valid JSON: {error}"])

@@ -16,26 +16,13 @@ To explain a flow, a structure or a change, show it: a sketch, a tree, a diagram
 - **Run anything:** `uv run --env-file .env <command>`. Python does not read `.env` on its own.
 - **Lint + format:** `uv run ruff check .` and `uv run ruff format .`
 - **Tests:** `uv run --env-file .env pytest`. Database tests need `TEST_DATABASE_URL`; they drop and recreate that database, so its name must end in `_test`. Without it they are skipped.
-- **Layout:** group code by concern in nested packages, imported from the repo root (`from config.db.schema import Area`). Everything database-related lives in `config/db/`: `connection.py` (engine), `schema.py` (SQLAlchemy models, one class per table) and `migrations/` (Alembic). `compose.yaml` stays at the root.
+- **Layout:** one package per domain under `src/` (`dataset`, `shelf`, `prediction`, `scoring`, `vision`, `labelling`, `runs`, `tasks`, `store`), imported from the repo root (`from src.tasks.derive import derive_tasks`). Each domain owns its rules, its queries (`queries.py`) and its API router (`router.py`); `src/main.py` includes the routers. `config/db/` holds only the shared infrastructure: `connection.py` (engine), `schema.py` (SQLAlchemy models, one class per table) and `migrations/` (Alembic). A rule lives once, in its domain: the area status rule is `src.shelf.status.area_status()`, the latest completed run is `src.runs.queries.get_latest_run()` and the `CompletedRun` dependency. See `docs/adr/0001-organise-code-by-domain.md`. `compose.yaml` stays at the root.
 - **API writes:** an endpoint that writes takes the `Transaction` dependency from `src/api/dependencies.py`. It commits before the response is sent and rolls back on error. Test the endpoint with `transaction` overridden by the `db` fixture, and test commit and rollback against committed rows.
 - **Migrations:** after editing `config/db/schema.py`, run `uv run --env-file .env alembic revision --autogenerate -m "<change>"`, review the generated file, then `alembic upgrade head` and `alembic check`.
 
 ## Domain vocabulary
 
-Use these exact terms in code, docs and replies.
-
-| Term | Meaning |
-|---|---|
-| Camera | A ceiling camera, keyed by its id (e.g. `6215`). One camera sees one or more gondola modules. |
-| Frame | One image from a camera, named `<unix_ts>.jpg`. |
-| Planogram | `dataset/planogram.json`: which product should occupy each area at the start of the day. |
-| Area | One planogram slot, `area_id` = `<camera>_<n>`. Defined by four corner points (TL, TR, BR, BL) in image pixels. |
-| Crop | An area cut out of a frame and warped into a straight rectangle. |
-| Compliance | Whether the product shown in the area is the one the planogram expects. |
-| Stock level | `empty` / `half` / `full`, with `stock_value` `0` / `0.5` / `1`. |
-| Reference | An unlabelled exemplar crop (early-morning "correct and full", emptiest-of-day "empty") used instead of training labels. |
-| Dev labels | Hand-made labels in the organisers' `annotations.json` format, used to score methods locally. |
-| Submission | The scored output, in the exact organiser format. |
+`CONTEXT.md` is the only glossary. Use its exact terms in code, docs and replies, and avoid the words it lists under _Avoid_.
 
 ## Scoring rules
 
@@ -87,7 +74,7 @@ run has no predictions.
 
 A camera's frame at `at` is its newest frame at or before `at` in the latest completed run's
 dataset, with or without predictions in that run; frames tied on time resolve to the highest
-filename. `config.db.queries.latest_frames()` is the only place that picks it: `/predictions`
+filename. `src.store.queries.latest_frames()` is the only place that picks it: `/predictions`
 and `/cameras/{camera}/frame` both use it, so they always show the same frame.
 
 `GET /predictions?at=&camera=` returns `{cameras}` for the Store page: per camera, its frame at
@@ -167,4 +154,4 @@ Changing any of these shapes is a breaking change for the frontend: update both 
 ## Docs
 
 - **Never state counts** of files, functions, cameras, areas or images in docs. They go stale. Name the things instead. Scoring numbers and config values are fine.
-- **Sub-agents do not inherit this file.** Tell them to follow `AGENTS.md`.
+- **Sub-agents do not inherit this file.** Tell them to follow `AGENTS.md` and `CONTEXT.md`.
