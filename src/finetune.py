@@ -22,9 +22,7 @@ label, fill-label and split files.
     uv run --extra ml --env-file .env python -m src.finetune --final
 """
 
-import hashlib
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 
 import joblib
@@ -37,18 +35,18 @@ import typer
 from PIL import Image
 from sklearn.linear_model import Ridge
 
-from config.db.save_run import git_sha
+from src.blend import SHIPPED, W_NET
 from src.classifier import features, fit_classifier, fit_proba
 from src.clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class
 from src.prediction_io import merge_fallbacks
-from src.split_labels import SPLIT, frame_of, load_test_frames
+from src.provenance import provenance, repo_path
+from src.split_labels import SPLIT, frame_of, held_out_window, load_test_frames
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 WORK = OUT / "finetune"
 BUNDLE = WORK / "bundle.joblib"
 CLASSES = WORK / "classes.json"
-SHIPPED = "average, network 75%"
 MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
 STD = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
@@ -155,26 +153,6 @@ def method_metrics(
     }
 
 
-def repo_path(path: Path) -> str:
-    resolved = path.resolve()
-    return str(resolved.relative_to(ROOT)) if resolved.is_relative_to(ROOT) else str(path)
-
-
-def provenance(params: dict, inputs: dict[str, Path | None]) -> dict:
-    """What produced a model or a score: time, git commit, params and the sha256 of each input file."""
-    return {
-        "created_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "git_sha": git_sha(),
-        "params": params,
-        "inputs": {
-            name: None
-            if path is None
-            else {"path": repo_path(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
-            for name, path in inputs.items()
-        },
-    }
-
-
 def head_classes(items: list[dict]) -> list[str]:
     return sorted({product_class(i["product_name"]) for i in items})
 
@@ -255,6 +233,7 @@ def main(
         "pretrained": pretrained,
         "final": final,
         "ignore": str(ignore) if ignore else None,
+        "out_dir": repo_path(out_dir),
     }
     evaluate = not (final or bundle_only)
     if evaluate and not split.exists():
@@ -278,15 +257,16 @@ def main(
     # to measure what a batch of labels added.
     dropped = set(json.loads(ignore.read_text())) if ignore else set()
     held = load_test_frames(split) if evaluate else set()
-    manual_fit = {k: v for k, v in manual.items() if frame_of(k) not in held}
+    excluded = held_out_window(held, {frame_of(i["key"]) for i in items})
+    manual_fit = {k: v for k, v in manual.items() if frame_of(k) not in excluded}
     manual_train = {k: v for k, v in manual_fit.items() if k not in dropped}
-    fill = {k: v for k, v in load_fill_labels(out_dir).items() if frame_of(k) not in held}
+    fill = {k: v for k, v in load_fill_labels(out_dir).items() if frame_of(k) not in excluded}
     if bundle_only:
         check_head_classes(work_dir, items)
         joblib.dump(build_bundle(items, manual_fit, emb, fill), work_dir / BUNDLE.name)
         typer.echo(f"wrote {work_dir / BUNDLE.name}")
         return
-    labels = regenerate_labels(items, manual_train, emb, zs_probs, zero, held)
+    labels = regenerate_labels(items, manual_train, emb, zs_probs, zero, excluded)
 
     classes = head_classes(items)
     cls = torch.tensor([classes.index(product_class(i["product_name"])) for i in items])
@@ -301,7 +281,8 @@ def main(
     n_manual = sum(labels[items[n]["key"]][2] == "manual" for n in train_idx)
     typer.echo(
         f"training on {len(train_idx)} confident labels ({n_manual} manual, "
-        f"{len(train_idx) - n_manual} clip); held-out frames: {len(held)}"
+        f"{len(train_idx) - n_manual} clip); held-out test frames: {len(held)}, "
+        f"frames excluded from training: {len(excluded)}"
     )
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -347,12 +328,6 @@ def main(
             sched.step()
             total += float(loss.detach()) * len(sel)
         msg = f"epoch {epoch + 1}/{epochs} loss {total / len(perm):.3f}"
-        if test_idx and (epoch + 1) % 2 == 0:
-            p_stock, _ = predict(model, imgs[test_idx], cls[test_idx], device)
-            truth = np.array(
-                [LEVELS.index(manual[items[n]["key"]]["stock_level"]) for n in test_idx]
-            )
-            msg += f" | held-out stock points {POINTS[(p_stock @ POINTS.T).argmax(1), truth].mean():+.2f}"
         typer.echo(msg)
 
     if final:
@@ -422,13 +397,16 @@ def main(
     report("CLIP + classifier (current)", (p_lr @ POINTS.T).argmax(1), zo)
     report("fine-tuned network", (p_stock @ POINTS.T).argmax(1), (p_ok >= 0.5).astype(int))
     report("fine-tuned stock + zero-shot id", (p_stock @ POINTS.T).argmax(1), zo)
-    for w in (0.25, 0.5, 0.75):  # average the two models' stock probabilities, w = network's share
+    for w in sorted(
+        {0.25, 0.5, W_NET}
+    ):  # average the two models' stock probabilities, w = network's share
         blend = w * p_stock + (1 - w) * p_lr
         report(f"average, network {w:.0%}", (blend @ POINTS.T).argmax(1), zo)
 
     metrics = provenance(params, inputs) | {
         "test_set": {
             "frames": len(held),
+            "frames_excluded_from_training": len(excluded),
             "areas": len(test_idx),
             "stock_empty_half_full": np.bincount(truth, minlength=3).tolist(),
             "wrong_product": int((true_ok == 0).sum()),

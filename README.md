@@ -264,14 +264,15 @@ experiments (strategy B, the hybrid, Google Vision hints, relabel queues, the ol
    `metadata.json` to `out/finetune/`. The test score from step 2 is the reported score.
 4. **Predict.** `python -m src.run_test --data-dir <dataset-folder>`.
 
-This is the only evaluation. Test frames are scored, never trained or tuned on. Adding labels does not move a frame into the
+This is the only evaluation. Test frames are scored, never trained or tuned on, and no frame
+from a camera's first test frame onwards is trained on, labelled or not. Adding labels does not move a frame into the
 test set; regenerate the split with `--force` only when starting a new evaluation baseline.
 
 `metadata.json` (with the model) and `metrics.json` (with the evaluation) record what produced
-them: time, git commit, every parameter, and the sha256 of `out/labels.json`,
+them: time, git commit (suffixed `-dirty` when the working tree had uncommitted changes), every parameter, and the sha256 of `out/labels.json`,
 `out/fill_labels.json` and the split file. Training is seeded (`--seed`, default 0), but the
-network is not deterministic on the Apple GPU (MPS): two runs with the same seed, split and code
-give different network scores. The CLIP and classifier scores are exactly reproducible.
+network is not deterministic on the Apple GPU (MPS): runs with the same seed, split and code give
+different network scores. The CLIP and classifier scores are exactly reproducible.
 
 `estimate_score --split labels/split.json` scores a predictions file on the test frames only. The
 shipped model has trained on those frames, so on its predictions this is not a held-out score.
@@ -285,14 +286,14 @@ shipped model has trained on those frames, so on its predictions this is not a h
 | Compliance | Zero-shot CLIP: expected product among the top-5 guesses over all store products, or the tray looks empty |
 | Stock level | 75% fine-tuned ResNet50 + 25% logistic regression on CLIP embeddings, level with the best expected points; fill rule raises package trays the fill model reads as >= 65% to full |
 | Training data | Hand labels (`out/labels.json`), weighted 3x, plus CLIP pseudo-labels with confidence >= 0.6; fill percentages (`out/fill_labels.json`) for the fill model |
-| Evaluation | Latest 20% of labelled frames per camera, never trained on |
-| Test score (shipped blend, before the fill rule) | +0.70 to +0.91 points per area over two identical runs: stock −0.24 to −0.02, compliance +0.93; 69-74% exact stock level |
-| Validation estimate | About +200 to +263 on the 289 validation areas (maximum +578) |
+| Evaluation | Latest 20% of labelled frames per camera; nothing from a camera's first test frame onwards is trained on |
+| Test score (shipped blend, before the fill rule) | +0.74 to +0.88 points per area over three identical runs: stock −0.19 to −0.06, compliance +0.93; 70-73% exact stock level |
+| Validation estimate | About +214 to +254 on the 289 validation areas (maximum +578) |
 
 Known limits:
 - **Stock is near break-even on unseen frames.** Almost all points come from compliance.
 - **Small test set, noisy training.** A few areas change the score noticeably, and reruns of the
-  network move the shipped score by about 0.2 points per area. The blend weights in `metrics.json`
+  network move the shipped score by up to about 0.2 points per area. The blend weights in `metrics.json`
   swap order between runs, so the 75% network share is not supported over 50% or the classifier
   alone.
 - **Off-image areas.** Crop pixels outside the image are painted black, which the models can read as

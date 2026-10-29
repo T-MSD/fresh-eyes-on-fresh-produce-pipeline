@@ -29,6 +29,7 @@ import typer
 
 from config.db.connection import make_engine
 from config.db.save_run import UnusableRun, fallback_keys, latest_dataset_id, save_run
+from src.blend import FILL_FULL_PCT, W_NET
 from src.clip_predict import LEVELS, POINTS, STOCK_VALUES, product_class, softmax
 from src.prediction_io import NetworkCrop, merge_fallbacks
 
@@ -36,7 +37,6 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 TEST = OUT / "test"
 BACKBONE, SIZE = "resnet50.a1_in1k", 224
-W_NET, FILL_FULL_PCT = 0.75, 65.0
 BUNDLE = OUT / "finetune" / "bundle.joblib"
 UNKNOWN_CLASS = "fresh produce"
 

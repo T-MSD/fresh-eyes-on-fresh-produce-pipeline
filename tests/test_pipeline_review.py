@@ -191,6 +191,8 @@ def test_evaluation_scores_only_the_split_test_frames(tmp_path):
     assert metrics["test_set"]["frames"] == 1
     assert metrics["test_set"]["areas"] == 1
     assert metrics["test_set"]["stock_empty_half_full"] == [0, 0, 1]
+    assert metrics["shipped"] in metrics["methods"]
+    assert metrics["params"]["out_dir"] == str(tmp_path)
 
 
 def test_evaluation_without_a_split_says_how_to_make_one(tmp_path):
@@ -206,12 +208,17 @@ def test_evaluation_without_a_split_says_how_to_make_one(tmp_path):
 
 
 def test_score_accounts_for_wrong_compliance_overstock_understock_and_missing():
-    from src.prediction_io import Label, score_submission
+    from src.estimate_score import tally
+    from src.prediction_io import Label
 
     labels = {
-        "6215/100.jpg/6215_1": Label(planogram_compliant=True, stock_level="empty"),
-        "6215/100.jpg/6215_2": Label(planogram_compliant=False, stock_level="full"),
-        "6215/100.jpg/6215_3": Label(planogram_compliant=True, stock_level="half"),
+        "6215": {
+            "100.jpg": {
+                "6215_1": Label(planogram_compliant=True, stock_level="empty"),
+                "6215_2": Label(planogram_compliant=False, stock_level="full"),
+                "6215_3": Label(planogram_compliant=True, stock_level="half"),
+            }
+        }
     }
     predictions = {
         "6215": {
@@ -221,7 +228,8 @@ def test_score_accounts_for_wrong_compliance_overstock_understock_and_missing():
             }
         }
     }
-    assert score_submission(predictions, labels) == -11 / 3
+    outcome = tally(predictions, labels)
+    assert outcome.points / outcome.areas == -11 / 3
 
 
 def test_merge_fallbacks_preserves_valid_predictions(tmp_path):

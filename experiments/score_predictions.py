@@ -2,7 +2,8 @@ from pathlib import Path
 
 import typer
 
-from src.prediction_io import MANUAL_LABELS, SUBMISSION, score_submission
+from src.estimate_score import tally
+from src.prediction_io import MANUAL_LABELS, SUBMISSION, Submission
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
@@ -18,7 +19,11 @@ def main(
     manual = MANUAL_LABELS.validate_json(labels.read_bytes())
     baseline = SUBMISSION.validate_json(before.read_bytes())
     candidate = SUBMISSION.validate_json(after.read_bytes())
-    old, new = score_submission(baseline, manual), score_submission(candidate, manual)
+    truth: Submission = {}
+    for key, label in manual.items():
+        camera, filename, area = key.split("/")
+        truth.setdefault(camera, {}).setdefault(filename, {})[area] = label
+    old, new = (t.points / t.areas for t in (tally(baseline, truth), tally(candidate, truth)))
     typer.echo(f"labels: {labels}")
     typer.echo(f"before: {old:+.6f} points per area ({old * len(manual):+.0f} total)")
     typer.echo(f"after:  {new:+.6f} points per area ({new * len(manual):+.0f} total)")

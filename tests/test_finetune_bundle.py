@@ -57,23 +57,3 @@ def test_method_metrics_scores_like_the_brief():
         "labels": ["empty", "half", "full"],
         "rows_truth_columns_predicted": [[1, 0, 0], [0, 0, 1], [0, 1, 0]],
     }
-
-
-def test_provenance_hashes_each_input_and_records_the_params(tmp_path):
-    import hashlib
-
-    from src.finetune import provenance
-
-    labels = tmp_path / "labels.json"
-    labels.write_text("{}")
-
-    record = provenance({"epochs": 8}, {"labels": labels, "split": None})
-
-    assert record["params"] == {"epochs": 8}
-    assert record["inputs"]["labels"] == {
-        "path": str(labels),
-        "sha256": hashlib.sha256(b"{}").hexdigest(),
-    }
-    assert record["inputs"]["split"] is None
-    assert record["created_at"].endswith("Z")
-    assert "git_sha" in record

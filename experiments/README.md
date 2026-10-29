@@ -33,7 +33,7 @@ strategy A; see Results and limits.
 ### Strategy A history
 
 Strategy A is the production pipeline in the main README. Before the 80/20 split, evaluation held
-out three whole cameras and reported +0.49 stock points per area, 85% exact level and
+out whole cameras and reported +0.49 stock points per area, 85% exact level and
 identification +0.96; that test set is retired, and its numbers are not comparable with the
 split's. The CLIP classifier also ran on its own (`experiments.train_classifier`, writing
 `out/predictions.json`), and Google Vision labels (`experiments.label_images`) were tried as

@@ -1,4 +1,3 @@
-import subprocess
 from collections.abc import Collection
 from pathlib import Path
 from typing import Any
@@ -8,6 +7,7 @@ from sqlalchemy import Connection, func, insert, select
 
 from config.db.schema import Area, Camera, Frame, Prediction, Run, StockLevel
 from config.db.schema import Dataset as DatasetLoad
+from src.provenance import git_sha
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 SHOWN_PROBLEMS = 10
@@ -35,16 +35,6 @@ def fallback_keys(path: Path) -> set[tuple[str, str, str]]:
         for frame, by_area in by_frame.items()
         for area in by_area
     }
-
-
-def git_sha() -> str | None:
-    try:
-        done = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    return done.stdout.strip() or None
 
 
 def latest_dataset_id(conn: Connection) -> int:
