@@ -7,7 +7,7 @@ assignment's points (POINTS[predicted, true]). Splits are repeated with differen
 the spread shows how noisy 150 labels are. It says which rule is more learnable, not which one the
 hidden annotators used.
 
-    uv run --env-file .env python -m src.fill_probe
+    uv run --env-file .env python -m experiments.fill_probe
 """
 
 import json
@@ -17,8 +17,8 @@ import numpy as np
 import typer
 from sklearn.linear_model import LogisticRegression, Ridge
 
+from src.classifier import standardise
 from src.clip_predict import POINTS
-from src.train_classifier import standardise
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"

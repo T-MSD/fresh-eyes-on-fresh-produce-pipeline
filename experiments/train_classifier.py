@@ -4,8 +4,8 @@ Compares it with the zero-shot baseline using the assignment's scoring, on camer
 was not trained on (so near-identical frames of the same shelf cannot leak into the test).
 Only if it scores higher does it overwrite out/predictions.json and out/prelabels.json.
 
-    uv run --extra ml --env-file .env python -m src.train_classifier
-    uv run --extra ml --env-file .env python -m src.train_classifier --force
+    uv run --extra ml --env-file .env python -m experiments.train_classifier
+    uv run --extra ml --env-file .env python -m experiments.train_classifier --force
 """
 
 import json
@@ -13,9 +13,9 @@ from pathlib import Path
 
 import numpy as np
 import typer
-from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import GroupKFold
 
+from src.classifier import features, fit_proba
 from src.clip_predict import LEVELS, POINTS, STOCK_VALUES
 from src.prediction_io import merge_fallbacks
 
@@ -25,36 +25,6 @@ MIN_LABELS = 100
 MIN_MINORITY = 10  # fewer examples of a class than this -> keep the zero-shot answer
 
 app = typer.Typer(add_completion=False)
-
-
-ZS_WEIGHT = 8  # the 3 zero-shot columns would otherwise be drowned by 512 embedding columns
-
-
-def standardise(a: np.ndarray) -> np.ndarray:
-    return (a - a.mean(axis=0)) / (a.std(axis=0) + 1e-6)
-
-
-def features(emb: np.ndarray, probs: np.ndarray, with_zeroshot: bool) -> np.ndarray:
-    """Standardised so that C means the same for every column (unit-length CLIP values are tiny)."""
-    parts = [standardise(emb)]
-    if with_zeroshot:
-        parts.append(ZS_WEIGHT * standardise(np.log(np.clip(probs, 1e-4, 1))))
-    return np.hstack(parts)
-
-
-def fit_classifier(x_tr, y_tr, c: float) -> LogisticRegression:
-    return LogisticRegression(C=c, max_iter=2000).fit(x_tr, y_tr)
-
-
-def proba_of(model: LogisticRegression, x, n_classes: int) -> np.ndarray:
-    """Class probabilities with one column per class, even if a class is absent from training."""
-    proba = np.zeros((len(x), n_classes))
-    proba[:, model.classes_] = model.predict_proba(x)
-    return proba
-
-
-def fit_proba(x_tr, y_tr, x_te, n_classes: int, c: float) -> np.ndarray:
-    return proba_of(fit_classifier(x_tr, y_tr, c), x_te, n_classes)
 
 
 def pick_levels(p_stock: np.ndarray) -> np.ndarray:

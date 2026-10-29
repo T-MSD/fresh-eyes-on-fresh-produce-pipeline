@@ -4,7 +4,7 @@
     uv run --env-file .env python -m src.review_tool export       # out/annotations.json in the official format
 
 Labels are saved to out/labels.json after every keypress. Suggestions from a model can be put
-in out/prelabels.json (same shape as labels.json; src/prelabel.py makes it from Vision); they are shown pre-filled and accepted
+in out/prelabels.json (same shape as labels.json; experiments/prelabel.py makes it from Vision); they are shown pre-filled and accepted
 with Enter.
 """
 

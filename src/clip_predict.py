@@ -219,10 +219,10 @@ def main(
     merge_fallbacks(predictions, OUT / "crops")
     (OUT / "predictions.json").write_text(json.dumps(predictions, indent=1))
     (OUT / "prelabels.json").write_text(json.dumps(pre, indent=1))
-    np.save(OUT / "clip_level_probs.npy", level_probs)  # extra features for train_classifier.py
+    np.save(OUT / "clip_level_probs.npy", level_probs)  # extra features for src/classifier.py
     (OUT / "clip_zeroshot.json").write_text(
         json.dumps(pre, indent=1)
-    )  # baseline for train_classifier.py
+    )  # baseline for src/classifier.py
     levels = [p["stock_level"] for p in pre.values()]
     typer.echo(
         f"{len(pre)} areas -> out/predictions.json; "
